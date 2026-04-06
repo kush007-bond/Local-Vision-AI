@@ -1,0 +1,8 @@
+{
+  "timestamp": 0.0,
+  "description": "A person sits down at a desk and opens a laptop.",
+  "model_id": "gemma3",
+  "backend": "ollama",
+  "latency_ms": 1240.0,
+  "token_count": 11
+}

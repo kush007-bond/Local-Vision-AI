@@ -1,0 +1,45 @@
+# LocalVisionAI — Default Configuration
+# All values here are the defaults used when no CLI flag or environment variable overrides them.
+# CLI flags > Environment variables (LVA_ prefix) > This file > Built-in defaults
+
+source:
+  type: file       # file | webcam | rtsp | url | screen
+  path: null       # Path to video file (required for type=file)
+  device_index: 0  # Webcam device index (for type=webcam)
+  rtsp_url: null   # RTSP stream URL (for type=rtsp)
+
+model:
+  backend: ollama              # ollama | transformers | llamacpp | mlx | vllm
+  model_id: gemma3             # Model identifier (Ollama name or HuggingFace repo ID)
+  multi_frame: false           # Send N consecutive frames in one prompt
+  multi_frame_count: 4         # How many frames to send together
+  load_in_4bit: false          # 4-bit quantization (HuggingFace only)
+
+sampling:
+  strategy: uniform            # uniform | scene | keyframe | adaptive
+  fps: 1.0                     # Frames per second to sample (uniform strategy)
+  scene_threshold: 30.0        # Mean pixel diff threshold for scene detection
+  min_interval: 0.5            # Minimum seconds between processed frames
+
+prompt:
+  user: "Describe what is happening in this frame in one sentence."
+  system: null                 # Optional system prompt override
+  context_mode: none           # none | sliding_window
+  context_tokens: 200          # Max tokens of prior context injected into each prompt
+
+output:
+  formats:
+    - console
+    - json
+  output_dir: ./output/
+
+pipeline:
+  queue_size: 8         # Max frames buffered in asyncio.Queue before drop policy kicks in
+  drop_policy: oldest   # oldest | newest | none
+  retry_on_error: true  # Retry failed frames
+  max_retries: 3        # Max per-frame retry attempts
+
+api:
+  host: 127.0.0.1
+  port: 8765
+  cors_origins: []      # Add origins here to allow external access
