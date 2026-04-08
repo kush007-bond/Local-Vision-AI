@@ -320,7 +320,13 @@ async def create_job(req: JobCreateRequest):
     _jobs[job_id] = job
     _ws_connections[job_id] = set()
 
-    # Validate config before starting
+    # Early validation before building config
+    if req.source_type == "file" and not req.source_path:
+        raise HTTPException(status_code=422, detail="source_path is required when source_type is 'file'.")
+    if req.source_type == "rtsp" and not req.rtsp_url:
+        raise HTTPException(status_code=422, detail="rtsp_url is required when source_type is 'rtsp'.")
+
+    # Validate full config before starting
     try:
         _build_pipeline_config(req)
     except Exception as e:

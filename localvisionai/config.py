@@ -88,8 +88,8 @@ class APIConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PipelineConfig(BaseModel):
-    source: SourceConfig = SourceConfig()
-    model: ModelConfig = ModelConfig()
+    source: SourceConfig = Field(default_factory=lambda: SourceConfig.model_construct(type="file"))
+    model: ModelConfig = Field(default_factory=ModelConfig)
     sampling: SamplingConfig = SamplingConfig()
     prompt: PromptConfig = PromptConfig()
     output: OutputConfig = OutputConfig()
