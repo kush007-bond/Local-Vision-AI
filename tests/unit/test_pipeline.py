@@ -132,12 +132,22 @@ class TestPipeline:
     async def test_pipeline_calls_handler_for_each_frame(self):
         """Pipeline should call handle() on all handlers once per processed frame."""
         from localvisionai.pipeline import Pipeline
+        from localvisionai.config import SourceConfig
 
-        config = PipelineConfig()
-        config.source.type = "file"
-        config.source.path = "fake.mp4"
-        config.output.formats = ["json"]
-        config.output.output_dir = "/tmp/test_pipeline/"
+        # Construct config with webcam source (no path needed) and override for test
+        config = PipelineConfig.from_cli({
+            "source": "webcam",
+            "video": None,
+            "device": 0,
+            "backend": "ollama",
+            "model": "gemma3",
+            "fps": 1.0,
+            "sampler": "uniform",
+            "prompt": "Describe.",
+            "output_formats": ["json"],
+            "output_dir": "/tmp/test_pipeline/",
+            "config_file": None,
+        })
 
         pipeline = Pipeline(config)
 

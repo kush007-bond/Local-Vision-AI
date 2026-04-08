@@ -41,9 +41,22 @@ def run(
     source: str = typer.Option("file", "--source", "-s", help="Source type: file|webcam|rtsp|url|screen."),
     device: int = typer.Option(0, "--device", help="Webcam device index (for --source webcam)."),
     rtsp_url: Optional[str] = typer.Option(None, "--rtsp-url", help="RTSP stream URL."),
-    backend: str = typer.Option("ollama", "--backend", "-b", help="Model backend: ollama|transformers|llamacpp|mlx."),
+    backend: str = typer.Option(
+        "ollama", "--backend", "-b",
+        help="Model backend: ollama|transformers|llamacpp|mlx|openai|anthropic|gemini|lmstudio.",
+    ),
     model: str = typer.Option("gemma3", "--model", "-m", help="Model identifier."),
     load_4bit: bool = typer.Option(False, "--4bit", help="Load model in 4-bit quantization (transformers only)."),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key",
+        help="API key for cloud backends (openai/anthropic/gemini). Defaults to env var.",
+        envvar=["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"],
+    ),
+    api_base: Optional[str] = typer.Option(
+        None, "--api-base",
+        help="Override base URL for the API (e.g. http://localhost:1234/v1 for LM Studio).",
+    ),
+    max_tokens: int = typer.Option(512, "--max-tokens", help="Max tokens to generate (cloud backends)."),
     fps: float = typer.Option(1.0, "--fps", help="Frames per second to sample (uniform strategy)."),
     sampler: str = typer.Option("uniform", "--sampler", help="Sampling strategy: uniform|scene|keyframe|adaptive."),
     prompt: str = typer.Option(
@@ -70,6 +83,9 @@ def run(
         "backend": backend,
         "model": model,
         "load_in_4bit": load_4bit,
+        "api_key": api_key,
+        "api_base": api_base,
+        "max_tokens": max_tokens,
         "fps": fps,
         "sampler": sampler,
         "prompt": prompt,

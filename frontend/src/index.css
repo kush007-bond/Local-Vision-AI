@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #252840;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #373b5c;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white
+           transition-colors hover:bg-brand-hover focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2
+           focus:ring-offset-bg-base disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-gray-400
+           transition-colors hover:bg-bg-elevated hover:text-gray-100 focus:outline-none
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white
+           transition-colors hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-500
+           focus:ring-offset-2 focus:ring-offset-bg-base disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .card {
+    @apply rounded-xl border border-bg-border bg-bg-surface p-4;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-bg-border bg-bg-elevated px-3 py-2 text-sm text-gray-100
+           placeholder-gray-500 transition-colors focus:border-brand focus:outline-none focus:ring-1
+           focus:ring-brand disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .label {
+    @apply mb-1 block text-xs font-medium uppercase tracking-wider text-gray-400;
+  }
+
+  .select {
+    @apply w-full rounded-lg border border-bg-border bg-bg-elevated px-3 py-2 text-sm text-gray-100
+           focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand;
+  }
+}

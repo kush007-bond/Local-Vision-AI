@@ -37,11 +37,18 @@ class SourceConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    backend: Literal["ollama", "transformers", "llamacpp", "mlx", "vllm"] = "ollama"
+    backend: Literal[
+        "ollama", "transformers", "llamacpp", "mlx", "vllm",
+        "openai", "anthropic", "gemini", "lmstudio",
+    ] = "ollama"
     model_id: str = "gemma3"
     multi_frame: bool = False
     multi_frame_count: int = Field(4, ge=2, le=16)
     load_in_4bit: bool = False
+    # Cloud / remote provider settings
+    api_key: Optional[str] = None    # Falls back to provider env var if None
+    api_base: Optional[str] = None   # Override base URL (e.g. LM Studio endpoint)
+    max_tokens: int = Field(512, ge=1)
 
 
 class SamplingConfig(BaseModel):
@@ -152,6 +159,12 @@ class PipelineConfig(BaseModel):
             base["model"]["backend"] = kwargs["backend"]
         if kwargs.get("model"):
             base["model"]["model_id"] = kwargs["model"]
+        if kwargs.get("api_key"):
+            base["model"]["api_key"] = kwargs["api_key"]
+        if kwargs.get("api_base"):
+            base["model"]["api_base"] = kwargs["api_base"]
+        if kwargs.get("max_tokens") is not None:
+            base["model"]["max_tokens"] = kwargs["max_tokens"]
 
         base.setdefault("sampling", {})
         if kwargs.get("sampler"):

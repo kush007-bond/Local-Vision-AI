@@ -1,0 +1,462 @@
+"""
+LocalVisionAI REST + WebSocket API server.
+
+Endpoints:
+    GET  /health                  health check
+    GET  /api/backends            list supported backends and example models
+    POST /api/jobs                create and start a pipeline job
+    GET  /api/jobs                list all jobs (summary)
+    GET  /api/jobs/{job_id}       job details + accumulated results
+    DELETE /api/jobs/{job_id}     cancel a running job
+
+    WS   /ws/{job_id}             stream live results for a job
+
+WebSocket message schema:
+    {"type": "result",   "data": {timestamp, description, latency_ms, ...}}
+    {"type": "status",   "status": "running"|"completed"|"failed"|"cancelled"}
+    {"type": "complete", "job_id": "..."}
+    {"type": "error",    "message": "..."}
+"""
+
+from __future__ import annotations
+
+import asyncio
+import datetime
+import traceback
+import uuid
+from dataclasses import dataclass, field
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
+app = FastAPI(
+    title="LocalVisionAI API",
+    version="0.1.0",
+    description="Local AI-powered video understanding pipeline — REST + WebSocket API.",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # Dev only; tighten for production
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve the built frontend if it exists
+import os
+from pathlib import Path
+
+_FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
+
+
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
+
+class JobCreateRequest(BaseModel):
+    backend: str = "ollama"
+    model_id: str = "gemma3"
+    source_type: str = "file"
+    source_path: Optional[str] = None
+    device_index: int = 0
+    rtsp_url: Optional[str] = None
+    fps: float = Field(1.0, gt=0, le=30)
+    sampler: str = "uniform"
+    prompt: str = "Describe what is happening in this frame in one sentence."
+    system_prompt: Optional[str] = None
+    context_mode: str = "none"
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    max_tokens: int = Field(512, ge=1)
+    output_formats: list[str] = ["json"]
+    output_dir: str = "./output/"
+
+
+# ---------------------------------------------------------------------------
+# Job state
+# ---------------------------------------------------------------------------
+
+@dataclass
+class JobState:
+    job_id: str
+    backend: str
+    model_id: str
+    source: str
+    status: str = "queued"          # queued | running | completed | failed | cancelled
+    results: list[dict] = field(default_factory=list)
+    error: Optional[str] = None
+    started_at: str = ""
+    completed_at: Optional[str] = None
+    task: Optional[asyncio.Task] = None
+    ws_handler: object = None       # WebSocketOutput instance
+
+    def summary(self) -> dict:
+        return {
+            "job_id": self.job_id,
+            "backend": self.backend,
+            "model_id": self.model_id,
+            "source": self.source,
+            "status": self.status,
+            "result_count": len(self.results),
+            "error": self.error,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+        }
+
+    def detail(self) -> dict:
+        return {**self.summary(), "results": self.results}
+
+
+# In-memory job store
+_jobs: dict[str, JobState] = {}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _build_pipeline_config(req: JobCreateRequest):
+    """Build a PipelineConfig from an API request."""
+    from localvisionai.config import PipelineConfig
+    return PipelineConfig.from_cli({
+        "source": req.source_type,
+        "video": req.source_path,
+        "device": req.device_index,
+        "rtsp_url": req.rtsp_url,
+        "backend": req.backend,
+        "model": req.model_id,
+        "load_in_4bit": False,
+        "api_key": req.api_key,
+        "api_base": req.api_base,
+        "max_tokens": req.max_tokens,
+        "fps": req.fps,
+        "sampler": req.sampler,
+        "prompt": req.prompt,
+        "system_prompt": req.system_prompt,
+        "context_mode": req.context_mode,
+        "output_formats": req.output_formats,
+        "output_dir": req.output_dir,
+        "config_file": None,
+    })
+
+
+async def _run_job(job: JobState, req: JobCreateRequest) -> None:
+    """Background task: run the pipeline and update job state."""
+    from localvisionai.pipeline import Pipeline
+    from localvisionai.outputs.websocket_output import WebSocketOutput
+
+    job.status = "running"
+    job.started_at = _now_iso()
+
+    ws_handler = WebSocketOutput()
+    job.ws_handler = ws_handler
+
+    # Broadcast status change to any already-connected WS clients
+    await _broadcast(job.job_id, {"type": "status", "status": "running"})
+
+    try:
+        config = _build_pipeline_config(req)
+        pipeline = Pipeline(config)
+        pipeline.job_id = job.job_id
+
+        # Accumulate results into job state via a capture handler
+        captured: list[dict] = []
+
+        class _CaptureHandler:
+            async def open(self, _job_id): pass
+            async def handle(self, result):
+                d = result.to_dict()
+                captured.append(d)
+                job.results.append(d)
+            async def close(self): pass
+
+        await pipeline.run(extra_handlers=[ws_handler, _CaptureHandler()])
+
+        job.status = "completed"
+
+    except asyncio.CancelledError:
+        job.status = "cancelled"
+        await _broadcast(job.job_id, {"type": "status", "status": "cancelled"})
+        raise
+
+    except Exception as exc:
+        job.status = "failed"
+        job.error = str(exc)
+        await _broadcast(job.job_id, {"type": "error", "message": str(exc)})
+
+    finally:
+        job.completed_at = _now_iso()
+        await _broadcast(job.job_id, {
+            "type": "complete",
+            "job_id": job.job_id,
+            "status": job.status,
+        })
+
+
+# ---------------------------------------------------------------------------
+# WebSocket connection manager
+# ---------------------------------------------------------------------------
+
+# job_id → set of connected WebSocket objects
+_ws_connections: dict[str, set[WebSocket]] = {}
+
+
+async def _broadcast(job_id: str, message: dict) -> None:
+    """Send a JSON message to all WebSocket clients watching a job."""
+    connections = _ws_connections.get(job_id, set())
+    dead: set[WebSocket] = set()
+    for ws in list(connections):
+        try:
+            await ws.send_json(message)
+        except Exception:
+            dead.add(ws)
+    connections -= dead
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/api/backends")
+async def list_backends():
+    """Return all supported backends with their example models and auth requirements."""
+    return {
+        "backends": [
+            {
+                "id": "ollama",
+                "label": "Ollama",
+                "type": "local",
+                "requires_api_key": False,
+                "default_model": "gemma3",
+                "example_models": ["gemma3", "qwen2-vl", "llava", "llava-llama3", "moondream"],
+                "install": "pip install localvisionai[ollama]",
+                "note": "Ollama must be running: ollama serve",
+            },
+            {
+                "id": "openai",
+                "label": "OpenAI",
+                "type": "cloud",
+                "requires_api_key": True,
+                "key_env_var": "OPENAI_API_KEY",
+                "default_model": "gpt-4o",
+                "example_models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+                "install": "pip install localvisionai[openai]",
+            },
+            {
+                "id": "anthropic",
+                "label": "Anthropic (Claude)",
+                "type": "cloud",
+                "requires_api_key": True,
+                "key_env_var": "ANTHROPIC_API_KEY",
+                "default_model": "claude-sonnet-4-6",
+                "example_models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+                "install": "pip install localvisionai[anthropic]",
+            },
+            {
+                "id": "gemini",
+                "label": "Google Gemini",
+                "type": "cloud",
+                "requires_api_key": True,
+                "key_env_var": "GOOGLE_API_KEY",
+                "default_model": "gemini-2.0-flash",
+                "example_models": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+                "install": "pip install localvisionai[gemini]",
+            },
+            {
+                "id": "lmstudio",
+                "label": "LM Studio",
+                "type": "local",
+                "requires_api_key": False,
+                "default_model": "local-model",
+                "example_models": ["llava-v1.6-mistral-7b", "qwen2-vl-7b", "internvl2-8b"],
+                "install": "pip install localvisionai[openai]",
+                "note": "LM Studio server must be running on localhost:1234",
+            },
+            {
+                "id": "transformers",
+                "label": "HuggingFace Transformers",
+                "type": "local",
+                "requires_api_key": False,
+                "default_model": "Qwen/Qwen2-VL-7B-Instruct",
+                "example_models": [
+                    "Qwen/Qwen2-VL-7B-Instruct",
+                    "llava-hf/llava-1.5-7b-hf",
+                    "google/paligemma-3b-pt-224",
+                ],
+                "install": "pip install localvisionai[transformers]",
+            },
+        ]
+    }
+
+
+@app.post("/api/jobs", status_code=201)
+async def create_job(req: JobCreateRequest):
+    """Create and immediately start a new pipeline job."""
+    job_id = f"j_{uuid.uuid4().hex[:8]}"
+    source_label = req.source_path or req.rtsp_url or req.source_type
+
+    job = JobState(
+        job_id=job_id,
+        backend=req.backend,
+        model_id=req.model_id,
+        source=source_label or req.source_type,
+    )
+    _jobs[job_id] = job
+    _ws_connections[job_id] = set()
+
+    # Validate config before starting
+    try:
+        _build_pipeline_config(req)
+    except Exception as e:
+        del _jobs[job_id]
+        del _ws_connections[job_id]
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # Launch pipeline as background task
+    task = asyncio.create_task(_run_job(job, req))
+    job.task = task
+
+    return job.summary()
+
+
+@app.get("/api/jobs")
+async def list_jobs():
+    """Return summary of all jobs, newest first."""
+    return {"jobs": [j.summary() for j in reversed(list(_jobs.values()))]}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: str):
+    """Return full job detail including all accumulated results."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    return job.detail()
+
+
+@app.delete("/api/jobs/{job_id}")
+async def cancel_job(job_id: str):
+    """Cancel a running job."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    if job.status not in ("queued", "running"):
+        raise HTTPException(status_code=409, detail=f"Job '{job_id}' is already {job.status}.")
+
+    if job.task and not job.task.done():
+        job.task.cancel()
+
+    job.status = "cancelled"
+    job.completed_at = _now_iso()
+    return {"job_id": job_id, "status": "cancelled"}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/{job_id}")
+async def job_websocket(websocket: WebSocket, job_id: str):
+    """
+    Stream live inference results for a job.
+
+    The client receives JSON messages:
+        {"type": "result",   "data": {...}}     on each new frame
+        {"type": "status",   "status": "..."}   on state transitions
+        {"type": "complete", "job_id": "..."}   when the job finishes
+        {"type": "error",    "message": "..."}  on failure
+    """
+    job = _jobs.get(job_id)
+    if job is None:
+        await websocket.close(code=4004, reason=f"Job '{job_id}' not found.")
+        return
+
+    await websocket.accept()
+    _ws_connections.setdefault(job_id, set()).add(websocket)
+
+    # Send all results buffered so far (client joining mid-job or after completion)
+    for result in job.results:
+        await websocket.send_json({"type": "result", "data": result})
+
+    # If already done, send final status and close
+    if job.status in ("completed", "failed", "cancelled"):
+        await websocket.send_json({"type": "complete", "job_id": job_id, "status": job.status})
+        _ws_connections[job_id].discard(websocket)
+        await websocket.close()
+        return
+
+    # Subscribe to the live handler queue
+    ws_handler = job.ws_handler
+    if ws_handler is None:
+        # Handler not yet created (job is still queued), poll briefly
+        for _ in range(20):
+            await asyncio.sleep(0.1)
+            if job.ws_handler is not None:
+                ws_handler = job.ws_handler
+                break
+
+    if ws_handler is not None:
+        q = ws_handler.subscribe()
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    # Send a ping to keep the connection alive
+                    try:
+                        await websocket.send_json({"type": "ping"})
+                    except Exception:
+                        break
+                    continue
+
+                if msg is None:
+                    # End-of-stream sentinel from WebSocketOutput.close()
+                    break
+
+                try:
+                    await websocket.send_json(msg)
+                except Exception:
+                    break
+
+        except WebSocketDisconnect:
+            pass
+        finally:
+            ws_handler.unsubscribe(q)
+
+    _ws_connections[job_id].discard(websocket)
+    try:
+        await websocket.close()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Serve built frontend (production)
+# ---------------------------------------------------------------------------
+
+@app.on_event("startup")
+async def _mount_frontend():
+    if _FRONTEND_DIST.exists():
+        from fastapi.responses import FileResponse
+
+        @app.get("/")
+        async def serve_index():
+            return FileResponse(_FRONTEND_DIST / "index.html")
+
+        app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="assets")

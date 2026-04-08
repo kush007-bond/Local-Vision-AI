@@ -12,6 +12,10 @@ _LAZY_ADAPTERS = {
     "llamacpp": ("localvisionai.adapters.llamacpp_adapter", "LlamaCppAdapter"),
     "mlx": ("localvisionai.adapters.mlx_adapter", "MLXAdapter"),
     "vllm": ("localvisionai.adapters.vllm_adapter", "VLLMAdapter"),
+    "openai": ("localvisionai.adapters.openai_adapter", "OpenAIAdapter"),
+    "anthropic": ("localvisionai.adapters.anthropic_adapter", "AnthropicAdapter"),
+    "gemini": ("localvisionai.adapters.gemini_adapter", "GeminiAdapter"),
+    "lmstudio": ("localvisionai.adapters.lmstudio_adapter", "LMStudioAdapter"),
 }
 
 # Eagerly available adapters

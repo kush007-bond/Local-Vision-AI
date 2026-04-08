@@ -48,8 +48,14 @@ class Pipeline:
         self.config = config
         self.job_id = f"j_{uuid.uuid4().hex[:8]}"
 
-    async def run(self) -> None:
-        """Run the full pipeline end-to-end."""
+    async def run(self, extra_handlers: Optional[list] = None) -> None:
+        """Run the full pipeline end-to-end.
+
+        Args:
+            extra_handlers: Additional AbstractOutputHandler instances injected
+                            at runtime (e.g. WebSocketOutput from the API server).
+                            These are appended after the config-based handlers.
+        """
         setup_logging()
         logger.info(f"Pipeline starting — job_id={self.job_id}")
 
@@ -58,23 +64,32 @@ class Pipeline:
         sampler = build_sampler(self.config.sampling)
 
         # Build adapter from registry
-        adapter_kwargs = {
-            "model": self.config.model.model_id
-            if self.config.model.backend == "ollama"
-            else None,
-            "model_id": self.config.model.model_id
-            if self.config.model.backend != "ollama"
-            else None,
-        }
-        # Clean None values
-        adapter_kwargs = {k: v for k, v in adapter_kwargs.items() if v is not None}
+        if self.config.model.backend == "ollama":
+            adapter_kwargs: dict = {"model": self.config.model.model_id}
+        else:
+            adapter_kwargs = {"model_id": self.config.model.model_id}
+
         if self.config.model.load_in_4bit:
             adapter_kwargs["load_in_4bit"] = True
+
+        # Remote / cloud provider settings
+        if self.config.model.api_key:
+            adapter_kwargs["api_key"] = self.config.model.api_key
+        if self.config.model.api_base:
+            if self.config.model.backend == "ollama":
+                # OllamaAdapter uses 'host' instead of 'api_base'
+                adapter_kwargs["host"] = self.config.model.api_base
+            else:
+                adapter_kwargs["api_base"] = self.config.model.api_base
+        if self.config.model.backend in ("openai", "anthropic", "gemini", "lmstudio"):
+            adapter_kwargs["max_new_tokens"] = self.config.model.max_tokens
 
         adapter = get_adapter(self.config.model.backend, **adapter_kwargs)
 
         # Build output handlers
         handlers = build_handlers(self.config.output, self.job_id)
+        if extra_handlers:
+            handlers.extend(extra_handlers)
 
         # Set JSON metadata if JSONOutput is present
         for h in handlers:
