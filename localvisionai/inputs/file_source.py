@@ -54,7 +54,13 @@ class VideoFileSource(AbstractVideoSource):
 
     def _open_sync(self):
         import av
-        return av.open(self.path)
+        from pathlib import Path
+        # Strip surrounding quotes (users sometimes paste paths with quotes on Windows),
+        # then resolve to an absolute path with forward slashes so FFmpeg doesn't
+        # mis-parse filenames containing dots (e.g. "site.com_...mp4").
+        clean = self.path.strip().strip('"').strip("'")
+        resolved = Path(clean).resolve()
+        return av.open(str(resolved).replace("\\", "/"))
 
     async def close(self) -> None:
         if self._container:

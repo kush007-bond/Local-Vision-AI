@@ -32,6 +32,7 @@ export function JobDetail({ jobId, onBack, onJobUpdate }: Props) {
       setJob(j)
       setResults(j.results)
       setStatus(j.status)
+      if (j.status === 'failed' && j.error) setError(j.error)
     }).catch(() => setError('Failed to load job'))
   }, [jobId])
 

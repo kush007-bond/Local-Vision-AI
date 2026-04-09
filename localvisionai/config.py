@@ -71,8 +71,8 @@ class OutputConfig(BaseModel):
 
 
 class PipelineRuntimeConfig(BaseModel):
-    queue_size: int = Field(8, ge=1)
-    drop_policy: Literal["oldest", "newest", "none"] = "oldest"
+    queue_size: int = Field(32, ge=1)
+    drop_policy: Literal["oldest", "newest", "none"] = "none"
     retry_on_error: bool = True
     max_retries: int = Field(3, ge=0)
 

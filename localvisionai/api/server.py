@@ -321,8 +321,18 @@ async def create_job(req: JobCreateRequest):
     _ws_connections[job_id] = set()
 
     # Early validation before building config
-    if req.source_type == "file" and not req.source_path:
-        raise HTTPException(status_code=422, detail="source_path is required when source_type is 'file'.")
+    if req.source_type == "file":
+        if not req.source_path:
+            raise HTTPException(status_code=422, detail="source_path is required when source_type is 'file'.")
+        clean_path = req.source_path.strip().strip('"').strip("'")
+        if not Path(clean_path).is_file():
+            del _jobs[job_id]
+            del _ws_connections[job_id]
+            raise HTTPException(
+                status_code=422,
+                detail=f"Video file not found: {clean_path}. Enter an absolute path to an existing file (no surrounding quotes).",
+            )
+        req.source_path = clean_path
     if req.source_type == "rtsp" and not req.rtsp_url:
         raise HTTPException(status_code=422, detail="rtsp_url is required when source_type is 'rtsp'.")
 
@@ -402,6 +412,8 @@ async def job_websocket(websocket: WebSocket, job_id: str):
 
     # If already done, send final status and close
     if job.status in ("completed", "failed", "cancelled"):
+        if job.status == "failed" and job.error:
+            await websocket.send_json({"type": "error", "message": job.error})
         await websocket.send_json({"type": "complete", "job_id": job_id, "status": job.status})
         _ws_connections[job_id].discard(websocket)
         await websocket.close()
