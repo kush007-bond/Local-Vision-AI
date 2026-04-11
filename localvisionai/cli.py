@@ -69,6 +69,22 @@ def run(
     output_formats: List[str] = typer.Option(["console", "json"], "--output-formats", "-o", help="Output formats."),
     output_dir: str = typer.Option("./output/", "--output-dir", help="Directory for output files."),
     config_file: Optional[str] = typer.Option(None, "--config", "-c", help="YAML config file path."),
+    audio: Optional[bool] = typer.Option(
+        None, "--audio/--no-audio",
+        help="Enable audio analysis alongside video frames.",
+    ),
+    audio_mode: Optional[str] = typer.Option(
+        None, "--audio-mode",
+        help="Audio routing mode: auto|native|transcribe. Default: auto.",
+    ),
+    audio_window: Optional[float] = typer.Option(
+        None, "--audio-window",
+        help="Seconds of audio sent/transcribed per frame (default: 3.0).",
+    ),
+    whisper_model: Optional[str] = typer.Option(
+        None, "--whisper-model",
+        help="Whisper model size for transcribe mode: tiny|base|small|medium|large.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Show latency and token counts."),
 ) -> None:
     """Run the LocalVisionAI pipeline on a video source."""
@@ -94,6 +110,10 @@ def run(
         "output_formats": output_formats,
         "output_dir": output_dir,
         "config_file": config_file,
+        "audio": audio,
+        "audio_mode": audio_mode,
+        "audio_window": audio_window,
+        "whisper_model": whisper_model,
     }
 
     try:

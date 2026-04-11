@@ -83,6 +83,32 @@ class APIConfig(BaseModel):
     cors_origins: list[str] = []
 
 
+class AudioConfig(BaseModel):
+    """Audio analysis settings.
+
+    Audio is disabled by default — existing configs without an `audio:`
+    section behave exactly as before. When enabled, audio is extracted once
+    at pipeline start, segmented per sampled frame, and either forwarded to
+    the adapter natively (OpenAI/Gemini) or transcribed via Whisper and
+    injected into the prompt text.
+    """
+
+    enabled: bool = False
+    mode: Literal["native", "transcribe", "auto"] = "auto"
+
+    # Window of audio (in seconds) associated with each sampled frame.
+    window_seconds: float = Field(3.0, gt=0, le=30.0)
+
+    # Whisper settings (used only when the pipeline falls back to transcribe mode)
+    whisper_model: str = "base"          # tiny | base | small | medium | large
+    whisper_device: str = "auto"         # auto | cpu | cuda
+    whisper_language: Optional[str] = None  # None = auto-detect
+
+    # ffmpeg extraction quality
+    sample_rate: int = Field(16000, ge=8000, le=48000)  # 16 kHz is optimal for Whisper
+    channels: int = Field(1, ge=1, le=2)                 # mono is sufficient for speech
+
+
 # ---------------------------------------------------------------------------
 # Root config
 # ---------------------------------------------------------------------------
@@ -95,6 +121,7 @@ class PipelineConfig(BaseModel):
     output: OutputConfig = OutputConfig()
     pipeline: PipelineRuntimeConfig = PipelineRuntimeConfig()
     api: APIConfig = APIConfig()
+    audio: AudioConfig = AudioConfig()
 
     # -----------------------------------------------------------------------
     # Factory methods
@@ -181,5 +208,20 @@ class PipelineConfig(BaseModel):
             base["output"]["formats"] = kwargs["output_formats"]
         if kwargs.get("output_dir"):
             base["output"]["output_dir"] = kwargs["output_dir"]
+
+        # Audio flags — only touch the audio section if at least one flag
+        # was explicitly provided, so unrelated CLI invocations leave the
+        # YAML-specified audio settings alone.
+        audio_keys = ("audio", "audio_mode", "audio_window", "whisper_model")
+        if any(kwargs.get(k) is not None for k in audio_keys):
+            base.setdefault("audio", {})
+            if kwargs.get("audio") is not None:
+                base["audio"]["enabled"] = bool(kwargs["audio"])
+            if kwargs.get("audio_mode"):
+                base["audio"]["mode"] = kwargs["audio_mode"]
+            if kwargs.get("audio_window") is not None:
+                base["audio"]["window_seconds"] = kwargs["audio_window"]
+            if kwargs.get("whisper_model"):
+                base["audio"]["whisper_model"] = kwargs["whisper_model"]
 
         return cls.model_validate(base)

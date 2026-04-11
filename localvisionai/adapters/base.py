@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional, Tuple
+from typing import TYPE_CHECKING, AsyncGenerator, Optional, Tuple
 
 from PIL import Image
+
+if TYPE_CHECKING:
+    from localvisionai.audio.base import AudioChunk
 
 
 @dataclass
@@ -20,9 +23,11 @@ class InferenceResult:
     latency_ms: float                   # End-to-end inference time in milliseconds
     token_count: int                    # Number of tokens generated
     raw_tokens: list[str] = field(default_factory=list)  # Individual tokens (if streamed)
+    audio_transcript: Optional[str] = None  # Populated when transcription was used
+    audio_mode: Optional[str] = None        # "native" | "transcribe" | None
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "timestamp": self.timestamp,
             "description": self.description,
             "model_id": self.model_id,
@@ -30,6 +35,11 @@ class InferenceResult:
             "latency_ms": round(self.latency_ms, 1),
             "token_count": self.token_count,
         }
+        if self.audio_mode is not None:
+            payload["audio_mode"] = self.audio_mode
+        if self.audio_transcript is not None:
+            payload["audio_transcript"] = self.audio_transcript
+        return payload
 
 
 class AbstractModelAdapter(ABC):
@@ -118,6 +128,33 @@ class AbstractModelAdapter(ABC):
     def supports_multi_frame(self) -> bool:
         """Override to True in adapters that natively support multiple images."""
         return False
+
+    @property
+    def supports_audio(self) -> bool:
+        """Override to True in adapters that accept raw audio bytes alongside a frame."""
+        return False
+
+    async def infer_with_audio(
+        self,
+        frame: Image.Image,
+        audio: "AudioChunk",
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream tokens while passing the audio chunk natively to the model.
+
+        The default implementation raises NotImplementedError — the pipeline
+        only dispatches to this method when `supports_audio` is True, so
+        adapters that declare native audio support must override both.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement infer_with_audio(). "
+            "Override it, or set supports_audio=False and use the transcription fallback."
+        )
+        # Make this a proper async generator even though the body raises —
+        # keeps type-checkers and the AsyncGenerator protocol happy.
+        if False:  # pragma: no cover
+            yield ""
 
     @property
     def preferred_resolution(self) -> Tuple[int, int]:

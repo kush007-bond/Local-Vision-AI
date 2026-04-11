@@ -29,6 +29,9 @@ from localvisionai.sampling import build_sampler
 from localvisionai.utils.logging import get_logger, setup_logging
 from localvisionai.utils.timing import LatencyTracker
 
+# Audio is imported lazily inside run() so pipelines that don't enable it
+# never pay the numpy/ffmpeg import cost.
+
 logger = get_logger(__name__)
 
 _SENTINEL = None  # Signals end of queue to consumer
@@ -47,6 +50,10 @@ class Pipeline:
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
         self.job_id = f"j_{uuid.uuid4().hex[:8]}"
+        # Audio components — populated in run() if audio is enabled
+        self._audio_segmenter = None
+        self._transcriber = None
+        self._use_native_audio = False
 
     async def run(self, extra_handlers: Optional[list] = None) -> None:
         """Run the full pipeline end-to-end.
@@ -110,6 +117,10 @@ class Pipeline:
             await adapter.load()
             logger.info("Model loaded. Starting pipeline.")
 
+            # Audio setup — extract track, build segmenter, load Whisper if needed
+            if self.config.audio.enabled:
+                await self._setup_audio(adapter)
+
             # Open the source
             async with source:
                 queue: asyncio.Queue = asyncio.Queue(maxsize=self.config.pipeline.queue_size)
@@ -128,6 +139,56 @@ class Pipeline:
 
             await adapter.unload()
             logger.info(f"Pipeline complete — job_id={self.job_id}")
+
+    # --------------------------------------------------------------------------
+    # Audio setup
+    # --------------------------------------------------------------------------
+
+    async def _setup_audio(self, adapter) -> None:
+        """Extract the audio track, build a segmenter, and load Whisper if needed."""
+        from localvisionai.audio import (
+            AudioSegmenter,
+            FfmpegAudioExtractor,
+            WhisperTranscriber,
+        )
+
+        logger.info("Audio enabled — extracting track via ffmpeg.")
+        extractor = FfmpegAudioExtractor(self.config)
+        samples = await asyncio.to_thread(extractor.extract)
+
+        self._audio_segmenter = AudioSegmenter(
+            samples,
+            sample_rate=self.config.audio.sample_rate,
+            channels=self.config.audio.channels,
+        )
+
+        self._use_native_audio = self._resolve_audio_mode(adapter)
+        if not self._use_native_audio:
+            logger.info(
+                f"Audio mode=transcribe — loading Whisper "
+                f"({self.config.audio.whisper_model})"
+            )
+            self._transcriber = WhisperTranscriber(
+                model_size=self.config.audio.whisper_model,
+                device=self.config.audio.whisper_device,
+                language=self.config.audio.whisper_language,
+            )
+            await self._transcriber.load()
+        else:
+            logger.info(
+                f"Audio mode=native — adapter '{adapter.backend_name}' "
+                "will receive raw audio alongside each frame."
+            )
+
+    def _resolve_audio_mode(self, adapter) -> bool:
+        """Return True when audio should be sent natively, False for transcribe."""
+        mode = self.config.audio.mode
+        if mode == "native":
+            return True
+        if mode == "transcribe":
+            return False
+        # auto: native iff the adapter advertises support
+        return bool(getattr(adapter, "supports_audio", False))
 
     # --------------------------------------------------------------------------
     # Producer
@@ -199,16 +260,48 @@ class Pipeline:
 
             for attempt in range(max(1, self.config.pipeline.max_retries)):
                 try:
+                    # Resolve optional audio chunk for this frame
+                    audio_chunk = None
+                    transcript: Optional[str] = None
+                    audio_mode_label: Optional[str] = None
+                    if self._audio_segmenter is not None:
+                        audio_chunk = self._audio_segmenter.get_chunk(
+                            ts, self.config.audio.window_seconds
+                        )
+
+                    # Transcribe up-front so the prompt can carry the text
+                    if (
+                        audio_chunk is not None
+                        and not audio_chunk.is_empty
+                        and not self._use_native_audio
+                        and self._transcriber is not None
+                    ):
+                        transcript = await self._transcriber.transcribe(audio_chunk)
+                        audio_chunk.transcript = transcript
+                        audio_mode_label = "transcribe"
+
                     user_prompt, system_prompt = build_prompt(
                         self.config.prompt,
                         context_summary=context.get_summary(),
+                        transcript=transcript,
                     )
 
                     tokens: list[str] = []
                     start_ms = time.perf_counter() * 1000
 
-                    async for token in adapter.infer(frame, user_prompt, system_prompt):
-                        tokens.append(token)
+                    if (
+                        audio_chunk is not None
+                        and not audio_chunk.is_empty
+                        and self._use_native_audio
+                    ):
+                        audio_mode_label = "native"
+                        async for token in adapter.infer_with_audio(
+                            frame, audio_chunk, user_prompt, system_prompt
+                        ):
+                            tokens.append(token)
+                    else:
+                        async for token in adapter.infer(frame, user_prompt, system_prompt):
+                            tokens.append(token)
 
                     elapsed_ms = time.perf_counter() * 1000 - start_ms
                     description = "".join(tokens).strip()
@@ -221,6 +314,8 @@ class Pipeline:
                         latency_ms=elapsed_ms,
                         token_count=len(tokens),
                         raw_tokens=tokens,
+                        audio_transcript=transcript,
+                        audio_mode=audio_mode_label,
                     )
 
                     # Update context window

@@ -10,7 +10,7 @@ API key:  set GOOGLE_API_KEY env var, or pass api_key= to the constructor.
 from __future__ import annotations
 
 import os
-from typing import AsyncGenerator, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 from PIL import Image
 
@@ -18,6 +18,9 @@ from localvisionai.exceptions import ModelInferenceError, ModelNotFoundError
 from localvisionai.utils.image import resize_frame, to_rgb
 from localvisionai.utils.logging import get_logger
 from .base import AbstractModelAdapter
+
+if TYPE_CHECKING:
+    from localvisionai.audio.base import AudioChunk
 
 logger = get_logger(__name__)
 
@@ -192,3 +195,62 @@ class GeminiAdapter(AbstractModelAdapter):
     @property
     def supports_multi_frame(self) -> bool:
         return True
+
+    # ------------------------------------------------------------------
+    # Native audio
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_audio(self) -> bool:
+        """All Gemini 1.5+ / 2.0+ models accept inline audio blobs."""
+        return True
+
+    async def infer_with_audio(
+        self,
+        frame: Image.Image,
+        audio: "AudioChunk",
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Send frame + inline WAV audio as a Gemini content list."""
+        if self._model is None:
+            raise ModelInferenceError("Adapter not loaded. Call load() first.")
+
+        import google.generativeai as genai
+
+        from localvisionai.audio.segmenter import AudioSegmenter
+
+        pil_frame = self._prepare_frame(frame)
+
+        model = self._model
+        if system_prompt:
+            model = genai.GenerativeModel(
+                model_name=self._model_id,
+                system_instruction=system_prompt,
+            )
+
+        gen_config = genai.types.GenerationConfig(
+            max_output_tokens=self._max_new_tokens,
+        )
+
+        content: list = [pil_frame]
+        wav_bytes = AudioSegmenter.chunk_to_wav_bytes(audio)
+        if wav_bytes:
+            # Gemini accepts inline binary parts as {"mime_type": ..., "data": ...}
+            content.append({"mime_type": "audio/wav", "data": wav_bytes})
+        content.append(prompt)
+
+        try:
+            response = await model.generate_content_async(
+                content,
+                generation_config=gen_config,
+                stream=True,
+            )
+            async for chunk in response:
+                text = chunk.text if hasattr(chunk, "text") else None
+                if text:
+                    yield text
+        except Exception as e:
+            raise ModelInferenceError(
+                f"Gemini audio inference failed for model '{self._model_id}': {e}"
+            ) from e

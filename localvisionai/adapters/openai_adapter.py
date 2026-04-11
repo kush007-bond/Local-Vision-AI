@@ -9,8 +9,9 @@ API key:  set OPENAI_API_KEY env var, or pass api_key= to the constructor.
 
 from __future__ import annotations
 
+import base64
 import os
-from typing import AsyncGenerator, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 from PIL import Image
 
@@ -18,6 +19,9 @@ from localvisionai.exceptions import ModelInferenceError, ModelNotFoundError
 from localvisionai.utils.image import encode_to_base64, resize_frame, to_rgb
 from localvisionai.utils.logging import get_logger
 from .base import AbstractModelAdapter
+
+if TYPE_CHECKING:
+    from localvisionai.audio.base import AudioChunk
 
 logger = get_logger(__name__)
 
@@ -201,3 +205,70 @@ class OpenAIAdapter(AbstractModelAdapter):
     @property
     def supports_multi_frame(self) -> bool:
         return True
+
+    # ------------------------------------------------------------------
+    # Native audio
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_audio(self) -> bool:
+        """GPT-4o and gpt-4o-audio-preview accept base64 WAV input."""
+        mid = self._model_id.lower()
+        return "audio" in mid or mid.startswith("gpt-4o")
+
+    async def infer_with_audio(
+        self,
+        frame: Image.Image,
+        audio: "AudioChunk",
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Send frame + raw audio (base64 WAV) in a single chat.completions call."""
+        if self._client is None:
+            raise ModelInferenceError("Adapter not loaded. Call load() first.")
+
+        # Local import to avoid a hard dependency when audio is not used.
+        from localvisionai.audio.segmenter import AudioSegmenter
+
+        b64_img = self._encode_frame(frame)
+        wav_bytes = AudioSegmenter.chunk_to_wav_bytes(audio)
+
+        content: list = [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{b64_img}",
+                    "detail": "auto",
+                },
+            },
+        ]
+        if wav_bytes:
+            b64_audio = base64.b64encode(wav_bytes).decode("ascii")
+            content.append(
+                {
+                    "type": "input_audio",
+                    "input_audio": {"data": b64_audio, "format": "wav"},
+                }
+            )
+        content.append({"type": "text", "text": prompt})
+
+        messages: list = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": content})
+
+        try:
+            stream = await self._client.chat.completions.create(
+                model=self._model_id,
+                messages=messages,
+                max_tokens=self._max_new_tokens,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content if chunk.choices else None
+                if delta:
+                    yield delta
+        except Exception as e:
+            raise ModelInferenceError(
+                f"OpenAI audio inference failed for model '{self._model_id}': {e}"
+            ) from e

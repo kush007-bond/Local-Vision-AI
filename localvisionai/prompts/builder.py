@@ -9,6 +9,7 @@ from .templates import get_system_prompt, format_verbosity_prompt
 def build_prompt(
     config: PromptConfig,
     context_summary: str | None = None,
+    transcript: str | None = None,
 ) -> tuple[str, str | None]:
     """
     Build the (user_prompt, system_prompt) tuple for a given frame.
@@ -16,6 +17,9 @@ def build_prompt(
     Args:
         config: The PromptConfig from PipelineConfig.
         context_summary: Rolling context from prior frames (sliding window mode).
+        transcript: Optional Whisper transcript for the time window around
+                    this frame. When provided, it is appended to the user
+                    prompt so text-only models can reason about speech.
 
     Returns:
         (user_prompt, system_prompt) — system_prompt may be None.
@@ -27,6 +31,13 @@ def build_prompt(
         user_prompt = (
             f"Previous context: {context_summary}\n\n"
             f"Current frame: {user_prompt}"
+        )
+
+    # Inject audio transcript if available
+    if transcript:
+        user_prompt = (
+            f"{user_prompt}\n\n"
+            f'[Audio transcript for this segment: "{transcript}"]'
         )
 
     system_prompt = get_system_prompt(
