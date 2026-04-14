@@ -135,6 +135,103 @@ def run(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# localvisionai analyze
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.command()
+def analyze(
+    video: str = typer.Argument(..., help="Path to the video file to analyse."),
+    backend: str = typer.Option(
+        "ollama", "--backend", "-b",
+        help="Model backend: ollama|transformers|openai|anthropic|gemini|lmstudio.",
+    ),
+    model: str = typer.Option("gemma3", "--model", "-m", help="Model identifier."),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key",
+        help="API key for cloud backends (openai/anthropic/gemini).",
+        envvar=["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"],
+    ),
+    api_base: Optional[str] = typer.Option(
+        None, "--api-base",
+        help="Override base URL for the API (e.g. LM Studio endpoint).",
+    ),
+    max_tokens: int = typer.Option(1024, "--max-tokens", help="Max tokens to generate per inference call."),
+    fps: float = typer.Option(1.0, "--fps", help="Frames per second to sample."),
+    sampler: str = typer.Option(
+        "uniform", "--sampler",
+        help="Sampling strategy: uniform|keyframe.",
+    ),
+    prompt: str = typer.Option(
+        "Describe what is happening in this frame in one sentence.",
+        "--prompt", "-p",
+        help="Prompt used for per-frame analysis.",
+    ),
+    output_dir: str = typer.Option(
+        "./output/", "--output-dir",
+        help="Directory where the analysis cache and thumbnail are saved.",
+    ),
+    audio: bool = typer.Option(
+        False, "--audio/--no-audio",
+        help="Enable audio extraction and transcription alongside video frames.",
+    ),
+    whisper_model: str = typer.Option(
+        "base", "--whisper-model",
+        help="Whisper model size: tiny|base|small|medium|large.",
+    ),
+    no_qa: bool = typer.Option(
+        False, "--no-qa",
+        help="Skip the interactive Q&A phase after the summary.",
+    ),
+    config_file: Optional[str] = typer.Option(None, "--config", "-c", help="YAML config file path."),
+) -> None:
+    """Analyse a video: extract frames, transcribe audio, generate a summary, then answer questions.
+
+    Results are cached to <output_dir>/<video_stem>_analysis.json so re-running
+    the command skips the expensive analysis pass and goes straight to the summary
+    and Q&A phase.
+    """
+    from localvisionai.config import PipelineConfig
+    from localvisionai.analysis.pipeline import AnalysisPipeline
+
+    cli_kwargs: dict = {
+        "config_file": config_file,
+        "video": video,
+        "source": "file",
+        "backend": backend,
+        "model": model,
+        "api_key": api_key,
+        "api_base": api_base,
+        "max_tokens": max_tokens,
+        "fps": fps,
+        "sampler": sampler,
+        "prompt": prompt,
+        "output_formats": ["json"],
+        "output_dir": output_dir,
+    }
+
+    if audio:
+        cli_kwargs["audio"] = True
+        cli_kwargs["audio_mode"] = "transcribe"  # analyze always uses Whisper
+        cli_kwargs["whisper_model"] = whisper_model
+
+    try:
+        config = PipelineConfig.from_cli(cli_kwargs)
+    except Exception as e:
+        console.print(f"[bold red]Configuration error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    try:
+        asyncio.run(AnalysisPipeline(config).run(skip_qa=no_qa))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Analysis interrupted by user.[/yellow]")
+    except Exception as e:
+        console.print(f"[bold red]Analysis error:[/bold red] {e}")
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # localvisionai serve
 # ─────────────────────────────────────────────────────────────────────────────
 
