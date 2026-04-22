@@ -68,6 +68,37 @@ class Pipeline:
 
         # Build components
         source = build_source(self.config.source)
+
+        # ── Audio-only mode auto-configuration ────────────────────────────
+        # When source type is 'audio', there is no video stream — force audio
+        # transcription on and wire the correct window size into the source.
+        if self.config.source.type == "audio":
+            if not self.config.audio.enabled:
+                from localvisionai.config import AudioConfig
+                # Use model_copy to safely create an updated config copy
+                self.config = self.config.model_copy(
+                    update={
+                        "audio": AudioConfig(
+                            enabled=True,
+                            mode="transcribe",
+                            window_seconds=self.config.audio.window_seconds,
+                            whisper_model=self.config.audio.whisper_model,
+                            whisper_device=self.config.audio.whisper_device,
+                            whisper_language=self.config.audio.whisper_language,
+                            sample_rate=self.config.audio.sample_rate,
+                            channels=self.config.audio.channels,
+                        )
+                    }
+                )
+            # Rebuild source with the correct window_seconds from config
+            from localvisionai.inputs.audio_source import AudioOnlySource
+            source = AudioOnlySource(
+                path=self.config.source.path,
+                window_seconds=self.config.audio.window_seconds,
+            )
+        # ──────────────────────────────────────────────────────────────────
+
+
         sampler = build_sampler(self.config.sampling)
 
         # Build adapter from registry
@@ -250,7 +281,20 @@ class Pipeline:
         frames_failed = 0
 
         while True:
-            item = await queue.get()
+            # ── Sliding-window freeze fix ─────────────────────────────────
+            # Use a timeout on queue.get() so that if the producer finishes
+            # and the sentinel was already consumed (or missed), the consumer
+            # does not block forever. A 60-second ceiling is generous enough
+            # for even the slowest CPU-only model.
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=60.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Consumer timed out waiting for next frame (60s). "
+                    "Assuming producer is done — exiting consumer."
+                )
+                break
+            # ─────────────────────────────────────────────────────────────
 
             if item is _SENTINEL:
                 queue.task_done()

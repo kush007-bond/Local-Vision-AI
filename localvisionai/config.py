@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # ---------------------------------------------------------------------------
 
 class SourceConfig(BaseModel):
-    type: Literal["file", "webcam", "rtsp", "url", "screen"] = "file"
+    type: Literal["file", "webcam", "rtsp", "url", "screen", "audio"] = "file"
     path: Optional[str] = None
     device_index: int = 0
     rtsp_url: Optional[str] = None
@@ -31,6 +31,8 @@ class SourceConfig(BaseModel):
     def validate_path_for_file(self) -> "SourceConfig":
         if self.type == "file" and not self.path:
             raise ValueError("source.path is required when source.type is 'file'.")
+        if self.type == "audio" and not self.path:
+            raise ValueError("source.path is required when source.type is 'audio'.")
         if self.type == "rtsp" and not self.rtsp_url:
             raise ValueError("source.rtsp_url is required when source.type is 'rtsp'.")
         return self

@@ -21,6 +21,11 @@ def build_source(config: SourceConfig) -> AbstractVideoSource:
     elif config.type == "screen":
         from .screen_source import ScreenCaptureSource
         return ScreenCaptureSource()
+    elif config.type == "audio":
+        from .audio_source import AudioOnlySource
+        # Use audio.window_seconds from the root config if available, else default 3.0
+        # We pass a default here; pipeline.py will also force audio.enabled=True
+        return AudioOnlySource(path=config.path, window_seconds=3.0)
     else:
         raise ValueError(f"Unknown source type: {config.type!r}")
 

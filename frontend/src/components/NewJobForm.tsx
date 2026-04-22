@@ -20,6 +20,10 @@ const DEFAULT: JobConfig = {
   max_tokens: 512,
   output_formats: ['json'],
   output_dir: './output/',
+  audio: false,
+  audio_mode: 'transcribe',
+  audio_window: 3.0,
+  whisper_model: 'base',
 }
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
@@ -81,13 +85,27 @@ export function NewJobForm({ onJobCreated }: Props) {
             <select
               className="select"
               value={form.source_type}
-              onChange={e => set('source_type', e.target.value as SourceType)}
+              onChange={e => {
+                const t = e.target.value as SourceType
+                setForm(f => ({
+                  ...f,
+                  source_type: t,
+                  // Auto-enable audio flag and switch prompt for audio-only mode
+                  audio: t === 'audio' ? true : f.audio,
+                  prompt: t === 'audio'
+                    ? 'Summarise what is being said in the audio transcript in one sentence.'
+                    : (f.source_type === 'audio'
+                        ? 'Describe what is happening in this frame in one sentence.'
+                        : f.prompt),
+                }))
+              }}
             >
               <option value="file">Video file</option>
               <option value="webcam">Webcam</option>
               <option value="rtsp">RTSP stream</option>
               <option value="url">YouTube / URL</option>
               <option value="screen">Screen capture</option>
+              <option value="audio">🎵 Audio only</option>
             </select>
           </Field>
 
@@ -137,6 +155,33 @@ export function NewJobForm({ onJobCreated }: Props) {
                 required
               />
             </Field>
+          )}
+
+          {form.source_type === 'audio' && (
+            <>
+              <Field label="Audio / video file path" hint="Path to an MP3, WAV, MP4, or any FFmpeg-supported file">
+                <input
+                  className="input"
+                  placeholder="/path/to/audio.mp3"
+                  value={form.source_path ?? ''}
+                  onChange={e => set('source_path', e.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Whisper model size" hint="Larger = more accurate but slower">
+                <select
+                  className="select"
+                  value={form.whisper_model ?? 'base'}
+                  onChange={e => set('whisper_model', e.target.value as JobConfig['whisper_model'])}
+                >
+                  <option value="tiny">tiny (fastest)</option>
+                  <option value="base">base (recommended)</option>
+                  <option value="small">small</option>
+                  <option value="medium">medium</option>
+                  <option value="large">large (slowest, most accurate)</option>
+                </select>
+              </Field>
+            </>
           )}
 
           <h2 className="pt-2 text-xs font-semibold uppercase tracking-widest text-gray-500">Sampling</h2>

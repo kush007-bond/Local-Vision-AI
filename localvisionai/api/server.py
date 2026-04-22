@@ -63,7 +63,7 @@ _FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 class JobCreateRequest(BaseModel):
     backend: str = "ollama"
     model_id: str = "gemma3"
-    source_type: str = "file"
+    source_type: str = "file"   # file | webcam | rtsp | url | screen | audio
     source_path: Optional[str] = None
     device_index: int = 0
     rtsp_url: Optional[str] = None
@@ -77,6 +77,11 @@ class JobCreateRequest(BaseModel):
     max_tokens: int = Field(512, ge=1)
     output_formats: list[str] = ["json"]
     output_dir: str = "./output/"
+    # Audio settings (only used when source_type='audio' or audio=True)
+    audio: bool = False
+    audio_mode: str = "auto"     # auto | native | transcribe
+    audio_window: float = 3.0
+    whisper_model: str = "base"
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +134,7 @@ def _now_iso() -> str:
 def _build_pipeline_config(req: JobCreateRequest):
     """Build a PipelineConfig from an API request."""
     from localvisionai.config import PipelineConfig
-    return PipelineConfig.from_cli({
+    cli_args = {
         "source": req.source_type,
         "video": req.source_path,
         "device": req.device_index,
@@ -148,7 +153,14 @@ def _build_pipeline_config(req: JobCreateRequest):
         "output_formats": req.output_formats,
         "output_dir": req.output_dir,
         "config_file": None,
-    })
+    }
+    # Pass audio settings when explicitly requested or when source is audio-only
+    if req.audio or req.source_type == "audio":
+        cli_args["audio"] = True
+        cli_args["audio_mode"] = req.audio_mode
+        cli_args["audio_window"] = req.audio_window
+        cli_args["whisper_model"] = req.whisper_model
+    return PipelineConfig.from_cli(cli_args)
 
 
 async def _run_job(job: JobState, req: JobCreateRequest) -> None:
@@ -331,6 +343,18 @@ async def create_job(req: JobCreateRequest):
             raise HTTPException(
                 status_code=422,
                 detail=f"Video file not found: {clean_path}. Enter an absolute path to an existing file (no surrounding quotes).",
+            )
+        req.source_path = clean_path
+    if req.source_type == "audio":
+        if not req.source_path:
+            raise HTTPException(status_code=422, detail="source_path is required when source_type is 'audio'.")
+        clean_path = req.source_path.strip().strip('"').strip("'")
+        if not Path(clean_path).is_file():
+            del _jobs[job_id]
+            del _ws_connections[job_id]
+            raise HTTPException(
+                status_code=422,
+                detail=f"Audio file not found: {clean_path}. Enter an absolute path to an existing audio/video file.",
             )
         req.source_path = clean_path
     if req.source_type == "rtsp" and not req.rtsp_url:

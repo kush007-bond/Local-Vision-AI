@@ -8,7 +8,7 @@ export type Backend =
   | 'llamacpp'
   | 'mlx'
 
-export type SourceType = 'file' | 'webcam' | 'rtsp' | 'url' | 'screen'
+export type SourceType = 'file' | 'webcam' | 'rtsp' | 'url' | 'screen' | 'audio'
 export type SamplerType = 'uniform' | 'scene' | 'keyframe' | 'adaptive'
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -75,6 +75,11 @@ export interface JobConfig {
   max_tokens: number
   output_formats: string[]
   output_dir: string
+  // Audio-only / audio-alongside-video settings
+  audio?: boolean
+  audio_mode?: 'auto' | 'native' | 'transcribe'
+  audio_window?: number
+  whisper_model?: string
 }
 
 export type WsMessage =

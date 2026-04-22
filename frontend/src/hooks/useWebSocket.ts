@@ -36,6 +36,8 @@ export function useJobWebSocket(jobId: string | null, opts: Options) {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data as string) as WsMessage
+        // Silently drop server keepalive pings — they carry no data
+        if (msg.type === 'ping') return
         optsRef.current.onMessage(msg)
       } catch {
         // ignore parse errors
@@ -43,6 +45,7 @@ export function useJobWebSocket(jobId: string | null, opts: Options) {
     }
 
     ws.onclose = () => optsRef.current.onClose?.()
+    // On network error, close cleanly (browser fires onclose after onerror anyway)
     ws.onerror = () => ws.close()
 
     return disconnect

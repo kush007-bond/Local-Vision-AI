@@ -25,6 +25,8 @@ export function JobDetail({ jobId, onBack, onJobUpdate }: Props) {
   const [error, setError]           = useState<string | null>(null)
   const scrollRef                   = useRef<HTMLDivElement>(null)
   const bottomRef                   = useRef<HTMLDivElement>(null)
+  // Track timestamps we've already rendered to deduplicate WS replay on reconnect
+  const seenTs                      = useRef<Set<number>>(new Set())
 
   // Load initial state
   useEffect(() => {
@@ -33,6 +35,8 @@ export function JobDetail({ jobId, onBack, onJobUpdate }: Props) {
       setResults(j.results)
       setStatus(j.status)
       if (j.status === 'failed' && j.error) setError(j.error)
+      // Pre-populate seen set so WS replay doesn't create duplicates
+      seenTs.current = new Set(j.results.map(r => r.timestamp))
     }).catch(() => setError('Failed to load job'))
   }, [jobId])
 
@@ -54,6 +58,11 @@ export function JobDetail({ jobId, onBack, onJobUpdate }: Props) {
   useJobWebSocket(jobId, {
     onMessage: useCallback((msg: WsMessage) => {
       if (msg.type === 'result') {
+        // Deduplicate: server replays all buffered results on every new WS
+        // connection (e.g. after slow inference pauses and client reconnects).
+        // Skip results we already loaded from the REST fetch or a prior stream.
+        if (seenTs.current.has(msg.data.timestamp)) return
+        seenTs.current.add(msg.data.timestamp)
         setResults(prev => [...prev, msg.data])
       } else if (msg.type === 'status') {
         setStatus(msg.status)
