@@ -10,6 +10,7 @@ import { StatusBadge } from './StatusBadge'
 import { BackendBadge } from './BackendBadge'
 import { ResultCard } from './ResultCard'
 import { WebcamPreview } from './WebcamPreview'
+import type { WebcamPreviewHandle } from './WebcamPreview'
 
 interface Props {
   jobId: string
@@ -17,9 +18,10 @@ interface Props {
   onJobUpdate: () => void
   sourceType?: SourceType
   deviceIndex?: number
+  captureFps?: number
 }
 
-export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex = 0 }: Props) {
+export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex = 0, captureFps = 1 }: Props) {
   const [job, setJob]               = useState<Job | null>(null)
   const [results, setResults]       = useState<InferenceResult[]>([])
   const [status, setStatus]         = useState<JobStatus>('queued')
@@ -28,6 +30,7 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
   const [error, setError]           = useState<string | null>(null)
   const scrollRef                   = useRef<HTMLDivElement>(null)
   const bottomRef                   = useRef<HTMLDivElement>(null)
+  const webcamRef                   = useRef<WebcamPreviewHandle>(null)
   // Track timestamps we've already rendered to deduplicate WS replay on reconnect
   const seenTs                      = useRef<Set<number>>(new Set())
 
@@ -81,6 +84,38 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
     }, [onJobUpdate]),
   })
 
+  const isRunning = status === 'running' || status === 'queued'
+
+  // Frame capture loop for browser-driven webcam jobs.
+  // Reads from the live <video> element via canvas and POSTs to /api/jobs/{id}/frame.
+  useEffect(() => {
+    if (sourceType !== 'webcam' || !isRunning) return
+
+    const canvas = document.createElement('canvas')
+    const startTime = Date.now()
+    const intervalMs = Math.max(200, 1000 / captureFps)
+
+    const id = setInterval(() => {
+      const video = webcamRef.current?.getVideoElement()
+      if (!video || video.readyState < 2 || video.videoWidth === 0) return
+
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(video, 0, 0)
+
+      const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
+      const timestamp = (Date.now() - startTime) / 1000
+
+      api.pushWebcamFrame(jobId, base64, timestamp).catch(() => {
+        // Silently drop — model may still be loading or job ended
+      })
+    }, intervalMs)
+
+    return () => clearInterval(id)
+  }, [sourceType, isRunning, jobId, captureFps])
+
   async function handleStop() {
     setStopping(true)
     try {
@@ -93,8 +128,6 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
       setStopping(false)
     }
   }
-
-  const isRunning = status === 'running' || status === 'queued'
 
   // Elapsed time
   const elapsed = (() => {
@@ -163,7 +196,7 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
         <div className="shrink-0 border-b border-bg-border bg-bg-surface px-5 py-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-500">Camera Feed</p>
           <div className="mx-auto max-w-xs">
-            <WebcamPreview deviceIndex={deviceIndex} autoStart />
+            <WebcamPreview ref={webcamRef} deviceIndex={deviceIndex} autoStart />
           </div>
         </div>
       )}

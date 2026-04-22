@@ -55,19 +55,23 @@ class Pipeline:
         self._transcriber = None
         self._use_native_audio = False
 
-    async def run(self, extra_handlers: Optional[list] = None) -> None:
+    async def run(self, extra_handlers: Optional[list] = None, source=None) -> None:
         """Run the full pipeline end-to-end.
 
         Args:
             extra_handlers: Additional AbstractOutputHandler instances injected
                             at runtime (e.g. WebSocketOutput from the API server).
                             These are appended after the config-based handlers.
+            source: Pre-built AbstractVideoSource. When provided, build_source()
+                    is skipped. Used for BrowserCaptureSource (webcam jobs) to
+                    avoid OpenCV/browser camera conflicts.
         """
         setup_logging()
         logger.info(f"Pipeline starting — job_id={self.job_id}")
 
-        # Build components
-        source = build_source(self.config.source)
+        # Build components (skip if caller provided a pre-built source)
+        if source is None:
+            source = build_source(self.config.source)
 
         # ── Audio-only mode auto-configuration ────────────────────────────
         # When source type is 'audio', there is no video stream — force audio

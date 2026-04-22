@@ -13,7 +13,7 @@ const UNIMPLEMENTED_SAMPLERS = new Set<SamplerType>(['scene', 'adaptive'])
 const UNIMPLEMENTED_SOURCES = new Set<SourceType>(['rtsp', 'url', 'screen'])
 
 interface Props {
-  onJobCreated: (jobId: string, sourceType: SourceType, deviceIndex: number) => void
+  onJobCreated: (jobId: string, sourceType: SourceType, deviceIndex: number, fps: number) => void
 }
 
 const DEFAULT: JobConfig = {
@@ -68,7 +68,7 @@ export function NewJobForm({ onJobCreated }: Props) {
     setSubmitting(true)
     try {
       const job = await api.createJob(form)
-      onJobCreated(job.job_id, form.source_type, form.device_index ?? 0)
+      onJobCreated(job.job_id, form.source_type, form.device_index ?? 0, form.fps)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {

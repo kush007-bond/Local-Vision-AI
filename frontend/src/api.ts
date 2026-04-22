@@ -32,6 +32,13 @@ export const api = {
     request<{ job_id: string; status: string }>(`/api/jobs/${jobId}`, {
       method: 'DELETE',
     }),
+
+  pushWebcamFrame: (jobId: string, imageBase64: string, timestamp: number) =>
+    request<{ ok: boolean }>(`/api/jobs/${jobId}/frame`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageBase64, timestamp }),
+    }),
 }
 
 export function createJobWebSocket(jobId: string): WebSocket {

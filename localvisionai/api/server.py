@@ -60,6 +60,11 @@ _FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 # Request / response models
 # ---------------------------------------------------------------------------
 
+class WebcamFrameRequest(BaseModel):
+    image: str      # base64-encoded JPEG
+    timestamp: float
+
+
 class JobCreateRequest(BaseModel):
     backend: str = "ollama"
     model_id: str = "gemma3"
@@ -101,6 +106,7 @@ class JobState:
     completed_at: Optional[str] = None
     task: Optional[asyncio.Task] = None
     ws_handler: object = None       # WebSocketOutput instance
+    browser_source: object = None   # BrowserCaptureSource for webcam jobs
 
     def summary(self) -> dict:
         return {
@@ -174,6 +180,14 @@ async def _run_job(job: JobState, req: JobCreateRequest) -> None:
     ws_handler = WebSocketOutput()
     job.ws_handler = ws_handler
 
+    # For webcam jobs, create a BrowserCaptureSource so the browser retains
+    # exclusive camera access (avoids OpenCV/getUserMedia conflict on Windows).
+    browser_source = None
+    if req.source_type == "webcam":
+        from localvisionai.inputs.browser_source import BrowserCaptureSource
+        browser_source = BrowserCaptureSource()
+        job.browser_source = browser_source
+
     # Broadcast status change to any already-connected WS clients
     await _broadcast(job.job_id, {"type": "status", "status": "running"})
 
@@ -193,7 +207,10 @@ async def _run_job(job: JobState, req: JobCreateRequest) -> None:
                 job.results.append(d)
             async def close(self): pass
 
-        await pipeline.run(extra_handlers=[ws_handler, _CaptureHandler()])
+        await pipeline.run(
+            extra_handlers=[ws_handler, _CaptureHandler()],
+            source=browser_source,  # None for non-webcam jobs (build_source runs normally)
+        )
 
         job.status = "completed"
 
@@ -390,6 +407,40 @@ async def get_job(job_id: str):
     return job.detail()
 
 
+@app.post("/api/jobs/{job_id}/frame", status_code=202)
+async def push_webcam_frame(job_id: str, req: WebcamFrameRequest):
+    """
+    Receive a browser-captured webcam frame and push it into the pipeline.
+
+    Called by the frontend once per configured FPS interval while a webcam job
+    is running. The frame is decoded from base64 JPEG and forwarded to the
+    BrowserCaptureSource that feeds the pipeline.
+    """
+    import base64
+    from io import BytesIO
+    from PIL import Image as PilImage
+
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    if job.status not in ("queued", "running"):
+        return {"ok": False, "reason": job.status}
+
+    browser_source = job.browser_source
+    if browser_source is None:
+        # Job not yet initialised (model still loading) — silently drop the frame.
+        return {"ok": False, "reason": "not_ready"}
+
+    try:
+        img_bytes = base64.b64decode(req.image)
+        img = PilImage.open(BytesIO(img_bytes)).convert("RGB")
+        await browser_source.push_frame(img, req.timestamp)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid frame data: {e}")
+
+    return {"ok": True}
+
+
 @app.delete("/api/jobs/{job_id}")
 async def cancel_job(job_id: str):
     """Cancel a running job."""
@@ -401,6 +452,10 @@ async def cancel_job(job_id: str):
 
     if job.task and not job.task.done():
         job.task.cancel()
+
+    # Signal browser-capture source to stop streaming
+    if job.browser_source is not None:
+        job.browser_source.stop()
 
     job.status = "cancelled"
     job.completed_at = _now_iso()

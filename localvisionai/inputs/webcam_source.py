@@ -63,12 +63,36 @@ class WebcamSource(AbstractVideoSource):
 
     def _open_sync(self):
         import cv2  # type: ignore
+        import time
+
         cap = cv2.VideoCapture(self._device_index)
         if not cap.isOpened():
             raise RuntimeError(
                 f"OpenCV could not open device index {self._device_index}. "
                 "Check that the camera is plugged in and not in use by another app."
             )
+
+        # Warm-up: some Windows camera drivers (MSMF/DirectShow) report isOpened()=True
+        # but return False on the first several reads until the sensor initialises.
+        # Read and discard up to 10 frames over ~1 s. If none succeed, the camera is
+        # either in exclusive use by another process (e.g. the browser preview) or broken.
+        warmed = False
+        for attempt in range(10):
+            ok, _ = cap.read()
+            if ok:
+                warmed = True
+                break
+            time.sleep(0.1)
+
+        if not warmed:
+            cap.release()
+            raise RuntimeError(
+                f"Webcam at device index {self._device_index} opened but could not "
+                "produce any frames. The camera may be in exclusive use by another "
+                "application (e.g. a browser tab using the webcam preview). "
+                "Close other apps using the camera and try again."
+            )
+
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -112,14 +136,24 @@ class WebcamSource(AbstractVideoSource):
             elapsed = time.perf_counter() - start_wall
             return pil_img, elapsed
 
+        frames_yielded = 0
         while True:
             try:
                 img, ts = await loop.run_in_executor(None, _read_frame)
                 if img is None:
+                    if frames_yielded == 0:
+                        raise SourceReadError(
+                            f"Webcam at device index {self._device_index} stopped "
+                            "producing frames immediately. The camera may have been "
+                            "disconnected or taken over by another application."
+                        )
                     logger.warning("Webcam read returned False — camera disconnected.")
                     break
+                frames_yielded += 1
                 yield img, ts
             except asyncio.CancelledError:
                 break
+            except SourceReadError:
+                raise
             except Exception as e:
                 raise SourceReadError(f"Webcam read error: {e}") from e
