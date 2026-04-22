@@ -5,18 +5,21 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import { useJobWebSocket } from '../hooks/useWebSocket'
-import type { InferenceResult, Job, JobStatus, WsMessage } from '../types'
+import type { InferenceResult, Job, JobStatus, SourceType, WsMessage } from '../types'
 import { StatusBadge } from './StatusBadge'
 import { BackendBadge } from './BackendBadge'
 import { ResultCard } from './ResultCard'
+import { WebcamPreview } from './WebcamPreview'
 
 interface Props {
   jobId: string
   onBack: () => void
   onJobUpdate: () => void
+  sourceType?: SourceType
+  deviceIndex?: number
 }
 
-export function JobDetail({ jobId, onBack, onJobUpdate }: Props) {
+export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex = 0 }: Props) {
   const [job, setJob]               = useState<Job | null>(null)
   const [results, setResults]       = useState<InferenceResult[]>([])
   const [status, setStatus]         = useState<JobStatus>('queued')
@@ -154,6 +157,16 @@ export function JobDetail({ jobId, onBack, onJobUpdate }: Props) {
           </button>
         )}
       </div>
+
+      {/* ── Webcam live preview (only while job is active) ── */}
+      {sourceType === 'webcam' && isRunning && (
+        <div className="shrink-0 border-b border-bg-border bg-bg-surface px-5 py-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-500">Camera Feed</p>
+          <div className="mx-auto max-w-xs">
+            <WebcamPreview deviceIndex={deviceIndex} autoStart />
+          </div>
+        </div>
+      )}
 
       {/* ── Results list ─────────────────────────────────── */}
       <div

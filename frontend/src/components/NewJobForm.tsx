@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react'
-import { Play, ChevronDown, Eye, EyeOff, Info } from 'lucide-react'
+import { Play, Eye, EyeOff, Info, AlertTriangle } from 'lucide-react'
 import { api } from '../api'
 import type { Backend, BackendInfo, JobConfig, SourceType, SamplerType } from '../types'
+import { WebcamPreview } from './WebcamPreview'
 
 const LOCAL_BACKENDS = new Set<Backend>(['ollama', 'lmstudio', 'transformers', 'llamacpp', 'mlx'])
 
+// Samplers that are referenced in the UI but not yet implemented in the backend
+const UNIMPLEMENTED_SAMPLERS = new Set<SamplerType>(['scene', 'adaptive'])
+
+// Source types not yet implemented in the backend
+const UNIMPLEMENTED_SOURCES = new Set<SourceType>(['rtsp', 'url', 'screen'])
+
 interface Props {
-  onJobCreated: (jobId: string) => void
+  onJobCreated: (jobId: string, sourceType: SourceType, deviceIndex: number) => void
 }
 
 const DEFAULT: JobConfig = {
@@ -61,7 +68,7 @@ export function NewJobForm({ onJobCreated }: Props) {
     setSubmitting(true)
     try {
       const job = await api.createJob(form)
-      onJobCreated(job.job_id)
+      onJobCreated(job.job_id, form.source_type, form.device_index ?? 0)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -122,15 +129,18 @@ export function NewJobForm({ onJobCreated }: Props) {
           )}
 
           {form.source_type === 'webcam' && (
-            <Field label="Device index" hint="0 = default webcam">
-              <input
-                className="input"
-                type="number"
-                min={0}
-                value={form.device_index ?? 0}
-                onChange={e => set('device_index', Number(e.target.value))}
-              />
-            </Field>
+            <>
+              <Field label="Device index" hint="0 = default webcam">
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  value={form.device_index ?? 0}
+                  onChange={e => set('device_index', Number(e.target.value))}
+                />
+              </Field>
+              <WebcamPreview deviceIndex={form.device_index ?? 0} />
+            </>
           )}
 
           {form.source_type === 'rtsp' && (
@@ -184,6 +194,13 @@ export function NewJobForm({ onJobCreated }: Props) {
             </>
           )}
 
+          {UNIMPLEMENTED_SOURCES.has(form.source_type) && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>This source type is not yet implemented and the job will fail at runtime.</span>
+            </div>
+          )}
+
           <h2 className="pt-2 text-xs font-semibold uppercase tracking-widest text-gray-500">Sampling</h2>
 
           <div className="grid grid-cols-2 gap-3">
@@ -195,9 +212,15 @@ export function NewJobForm({ onJobCreated }: Props) {
               >
                 <option value="uniform">Uniform FPS</option>
                 <option value="keyframe">Keyframes only</option>
-                <option value="scene">Scene changes</option>
-                <option value="adaptive">Adaptive</option>
+                <option value="scene">Scene changes (not implemented)</option>
+                <option value="adaptive">Adaptive (not implemented)</option>
               </select>
+              {UNIMPLEMENTED_SAMPLERS.has(form.sampler) && (
+                <div className="mt-1 flex items-center gap-1.5 text-xs text-amber-400">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  This sampler is not yet implemented and the job will fail at runtime.
+                </div>
+              )}
             </Field>
 
             <Field label={`FPS (${form.fps})`}>

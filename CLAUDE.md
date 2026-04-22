@@ -11,9 +11,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `ConsoleOutput`, `JSONOutput`, `WebSocketOutput`
 - FastAPI REST + WebSocket server (`localvisionai/api/server.py`)
 - React + TypeScript + Tailwind + Vite frontend (`frontend/`)
+- `AnalysisPipeline` (`localvisionai/analysis/`) — offline 4-phase workflow: frame analysis → full audio transcription (Whisper) → summary → interactive Q&A. Cache stored at `<output_dir>/<stem>_analysis.json`.
+- Webcam live preview in `NewJobForm.tsx` — uses browser `getUserMedia`, renders in a 16:9 `<video>` element, starts/stops independently of the pipeline job.
 
 **Referenced but not yet implemented (will raise ImportError at runtime):**
-- Input sources: `WebcamSource`, `RTSPSource`, `URLSource`, `ScreenCaptureSource`
+- Input sources: `RTSPSource`, `URLSource`, `ScreenCaptureSource`
 - Samplers: `SceneSampler`, `AdaptiveSampler`
 - Output handlers: `SRTOutput`, `CSVOutput`, `SQLiteOutput`
 - Local adapters: `LlamaCppAdapter`, `MLXAdapter`, `VLLMAdapter`
@@ -115,6 +117,10 @@ localvisionai run --video v.mp4 --backend lmstudio --model mymodel --api-base ht
 1. Create `localvisionai/adapters/<name>_adapter.py` implementing `AbstractModelAdapter`.
 2. Add it to `_LAZY_ADAPTERS` in `localvisionai/adapters/registry.py`.
 3. Add the optional dependency under `[project.optional-dependencies]` in `pyproject.toml`.
+
+## Known Issues
+
+- `frontend/src/components/BackendBadge.tsx` has a pre-existing `TS6133` unused-import error that causes `npm run build` to fail — not a regression, fix before shipping frontend.
 
 ## Testing Conventions
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from './api'
-import type { View } from './types'
+import type { SourceType, View } from './types'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { Dashboard } from './components/Dashboard'
@@ -10,6 +10,7 @@ import { JobDetail } from './components/JobDetail'
 export default function App() {
   const [view, setView]             = useState<View>('dashboard')
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [activeJobSource, setActiveJobSource] = useState<{ type: SourceType; deviceIndex: number } | null>(null)
   const [serverOnline, setServerOnline] = useState(false)
   const [activeCount, setActiveCount]   = useState(0)
   const [dashRefresh, setDashRefresh]   = useState(0)
@@ -43,8 +44,9 @@ export default function App() {
     return () => clearInterval(id)
   }, [dashRefresh])
 
-  const handleJobCreated = useCallback((jobId: string) => {
+  const handleJobCreated = useCallback((jobId: string, sourceType: SourceType, deviceIndex: number) => {
     setActiveJobId(jobId)
+    setActiveJobSource({ type: sourceType, deviceIndex })
     setView('job-detail')
     setDashRefresh(n => n + 1)
   }, [])
@@ -86,6 +88,8 @@ export default function App() {
               jobId={activeJobId}
               onBack={() => setView('dashboard')}
               onJobUpdate={handleJobUpdate}
+              sourceType={activeJobSource?.type}
+              deviceIndex={activeJobSource?.deviceIndex}
             />
           )}
 
