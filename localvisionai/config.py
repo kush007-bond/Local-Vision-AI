@@ -90,25 +90,20 @@ class AudioConfig(BaseModel):
 
     Audio is disabled by default — existing configs without an `audio:`
     section behave exactly as before. When enabled, audio is extracted once
-    at pipeline start, segmented per sampled frame, and either forwarded to
-    the adapter natively (OpenAI/Gemini) or transcribed via Whisper and
-    injected into the prompt text.
+    at pipeline start, segmented per sampled frame, and forwarded natively
+    to the model adapter (requires a multimodal model with audio support,
+    e.g. Gemini, GPT-4o, or Claude).
     """
 
     enabled: bool = False
-    mode: Literal["native", "transcribe", "auto"] = "auto"
+    mode: Literal["native", "auto"] = "auto"
 
     # Window of audio (in seconds) associated with each sampled frame.
     window_seconds: float = Field(3.0, gt=0, le=30.0)
 
-    # Whisper settings (used only when the pipeline falls back to transcribe mode)
-    whisper_model: str = "base"          # tiny | base | small | medium | large
-    whisper_device: str = "auto"         # auto | cpu | cuda
-    whisper_language: Optional[str] = None  # None = auto-detect
-
     # ffmpeg extraction quality
-    sample_rate: int = Field(16000, ge=8000, le=48000)  # 16 kHz is optimal for Whisper
-    channels: int = Field(1, ge=1, le=2)                 # mono is sufficient for speech
+    sample_rate: int = Field(16000, ge=8000, le=48000)
+    channels: int = Field(1, ge=1, le=2)
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +209,7 @@ class PipelineConfig(BaseModel):
         # Audio flags — only touch the audio section if at least one flag
         # was explicitly provided, so unrelated CLI invocations leave the
         # YAML-specified audio settings alone.
-        audio_keys = ("audio", "audio_mode", "audio_window", "whisper_model")
+        audio_keys = ("audio", "audio_mode", "audio_window")
         if any(kwargs.get(k) is not None for k in audio_keys):
             base.setdefault("audio", {})
             if kwargs.get("audio") is not None:
@@ -223,7 +218,5 @@ class PipelineConfig(BaseModel):
                 base["audio"]["mode"] = kwargs["audio_mode"]
             if kwargs.get("audio_window") is not None:
                 base["audio"]["window_seconds"] = kwargs["audio_window"]
-            if kwargs.get("whisper_model"):
-                base["audio"]["whisper_model"] = kwargs["whisper_model"]
 
         return cls.model_validate(base)

@@ -23,8 +23,8 @@ class InferenceResult:
     latency_ms: float                   # End-to-end inference time in milliseconds
     token_count: int                    # Number of tokens generated
     raw_tokens: list[str] = field(default_factory=list)  # Individual tokens (if streamed)
-    audio_transcript: Optional[str] = None  # Populated when transcription was used
-    audio_mode: Optional[str] = None        # "native" | "transcribe" | None
+    audio_transcript: Optional[str] = None
+    audio_mode: Optional[str] = None        # "native" | None
 
     def to_dict(self) -> dict:
         payload = {

@@ -4,12 +4,8 @@ audio segments.
 When the user selects source_type='audio', there is no video stream.  The
 pipeline still expects (frame, timestamp) pairs, so this source emits a tiny
 blank PIL image as a visual placeholder for every audio window boundary.  The
-real value is in the AudioSegmenter + WhisperTranscriber path: the pipeline
-will transcribe each window and inject the text into the model prompt.
-
-For an audio-only job the model is used purely to summarise / reason about
-the transcript — no image content is sent (the adapter receives a 1×1 white
-pixel which typical models ignore gracefully).
+audio chunk for each window is passed natively to the model adapter (requires
+an adapter with ``supports_audio = True``, e.g. Gemini, GPT-4o, or Claude).
 """
 
 from __future__ import annotations
@@ -35,8 +31,8 @@ class AudioOnlySource(AbstractVideoSource):
     Emits timed placeholder frames at a fixed interval to drive audio-only analysis.
 
     The pipeline audio segmenter slices audio around each emitted timestamp.
-    Whisper transcribes each slice; the transcript is injected into the prompt.
-    The model then summarises speech content without any real visual input.
+    The audio chunk is forwarded natively to the model adapter alongside the
+    placeholder frame so the model can reason about spoken content directly.
 
     Args:
         path:            Path to the audio or video file (audio track is extracted).

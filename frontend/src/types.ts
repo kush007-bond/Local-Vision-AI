@@ -77,9 +77,8 @@ export interface JobConfig {
   output_dir: string
   // Audio-only / audio-alongside-video settings
   audio?: boolean
-  audio_mode?: 'auto' | 'native' | 'transcribe'
+  audio_mode?: 'auto' | 'native'
   audio_window?: number
-  whisper_model?: string
 }
 
 export type WsMessage =

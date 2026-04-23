@@ -52,8 +52,9 @@ class Pipeline:
         self.job_id = f"j_{uuid.uuid4().hex[:8]}"
         # Audio components — populated in run() if audio is enabled
         self._audio_segmenter = None
-        self._transcriber = None
         self._use_native_audio = False
+        # Sampler reference — stored so _maybe_adjust_fps can call record_latency
+        self._sampler = None
 
     async def run(self, extra_handlers: Optional[list] = None, source=None) -> None:
         """Run the full pipeline end-to-end.
@@ -84,11 +85,8 @@ class Pipeline:
                     update={
                         "audio": AudioConfig(
                             enabled=True,
-                            mode="transcribe",
+                            mode="native",
                             window_seconds=self.config.audio.window_seconds,
-                            whisper_model=self.config.audio.whisper_model,
-                            whisper_device=self.config.audio.whisper_device,
-                            whisper_language=self.config.audio.whisper_language,
                             sample_rate=self.config.audio.sample_rate,
                             channels=self.config.audio.channels,
                         )
@@ -104,6 +102,7 @@ class Pipeline:
 
 
         sampler = build_sampler(self.config.sampling)
+        self._sampler = sampler  # keep reference for adaptive FPS
 
         # Build adapter from registry
         if self.config.model.backend == "ollama":
@@ -180,12 +179,8 @@ class Pipeline:
     # --------------------------------------------------------------------------
 
     async def _setup_audio(self, adapter) -> None:
-        """Extract the audio track, build a segmenter, and load Whisper if needed."""
-        from localvisionai.audio import (
-            AudioSegmenter,
-            FfmpegAudioExtractor,
-            WhisperTranscriber,
-        )
+        """Extract the audio track and build a segmenter for native model delivery."""
+        from localvisionai.audio import AudioSegmenter, FfmpegAudioExtractor
 
         logger.info("Audio enabled — extracting track via ffmpeg.")
         extractor = FfmpegAudioExtractor(self.config)
@@ -197,33 +192,17 @@ class Pipeline:
             channels=self.config.audio.channels,
         )
 
-        self._use_native_audio = self._resolve_audio_mode(adapter)
-        if not self._use_native_audio:
-            logger.info(
-                f"Audio mode=transcribe — loading Whisper "
-                f"({self.config.audio.whisper_model})"
-            )
-            self._transcriber = WhisperTranscriber(
-                model_size=self.config.audio.whisper_model,
-                device=self.config.audio.whisper_device,
-                language=self.config.audio.whisper_language,
-            )
-            await self._transcriber.load()
-        else:
+        self._use_native_audio = bool(getattr(adapter, "supports_audio", False))
+        if self._use_native_audio:
             logger.info(
                 f"Audio mode=native — adapter '{adapter.backend_name}' "
                 "will receive raw audio alongside each frame."
             )
-
-    def _resolve_audio_mode(self, adapter) -> bool:
-        """Return True when audio should be sent natively, False for transcribe."""
-        mode = self.config.audio.mode
-        if mode == "native":
-            return True
-        if mode == "transcribe":
-            return False
-        # auto: native iff the adapter advertises support
-        return bool(getattr(adapter, "supports_audio", False))
+        else:
+            logger.warning(
+                f"Adapter '{adapter.backend_name}' does not declare native audio "
+                "support — audio chunks will be skipped."
+            )
 
     # --------------------------------------------------------------------------
     # Producer
@@ -310,28 +289,16 @@ class Pipeline:
                 try:
                     # Resolve optional audio chunk for this frame
                     audio_chunk = None
-                    transcript: Optional[str] = None
                     audio_mode_label: Optional[str] = None
                     if self._audio_segmenter is not None:
                         audio_chunk = self._audio_segmenter.get_chunk(
                             ts, self.config.audio.window_seconds
                         )
 
-                    # Transcribe up-front so the prompt can carry the text
-                    if (
-                        audio_chunk is not None
-                        and not audio_chunk.is_empty
-                        and not self._use_native_audio
-                        and self._transcriber is not None
-                    ):
-                        transcript = await self._transcriber.transcribe(audio_chunk)
-                        audio_chunk.transcript = transcript
-                        audio_mode_label = "transcribe"
-
                     user_prompt, system_prompt = build_prompt(
                         self.config.prompt,
                         context_summary=context.get_summary(),
-                        transcript=transcript,
+                        transcript=None,
                     )
 
                     tokens: list[str] = []
@@ -362,7 +329,7 @@ class Pipeline:
                         latency_ms=elapsed_ms,
                         token_count=len(tokens),
                         raw_tokens=tokens,
-                        audio_transcript=transcript,
+                        audio_transcript=None,
                         audio_mode=audio_mode_label,
                     )
 
@@ -403,11 +370,13 @@ class Pipeline:
 
     def _maybe_adjust_fps(self, actual_latency_s: float) -> None:
         """
-        Auto-adjust sampler FPS if model is slower than the target rate.
-        Only applies to UniformSampler on CPU-only machines.
+        Auto-adjust sampler FPS if the active sampler supports it.
+
+        Currently only AdaptiveSampler implements ``record_latency``; all
+        other sampler types are left untouched.
         """
-        from localvisionai.sampling.uniform_sampler import UniformSampler
-        # Will be bound after build_sampler() is called; accessed via runtime attribute
-        # This is set after sampler construction in run()
-        # For full implementation, the sampler reference would be stored on self
-        pass
+        if self._sampler is None:
+            return
+        record = getattr(self._sampler, "record_latency", None)
+        if callable(record):
+            record(actual_latency_s)

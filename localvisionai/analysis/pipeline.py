@@ -5,9 +5,9 @@ Workflow
 1. **Frame analysis** — sample the video at the configured FPS, run per-frame
    inference, save results to a JSON cache file.  The cache survives between
    runs so the expensive pass is only paid once per video.
-2. **Audio analysis** — extract the full audio track with ffmpeg and transcribe
-   it in 30-second chunks via Whisper.  The full transcript is stored alongside
-   the per-frame results.
+2. **Audio analysis** — extract the full audio track with ffmpeg and send audio
+   chunks natively to the model alongside each frame (requires a multimodal
+   adapter that declares ``supports_audio = True``).
 3. **Summarisation** — the model is given all frame descriptions and the full
    audio transcript and asked to write a comprehensive summary.
 4. **Interactive Q&A** — the user can ask questions; each answer is grounded in
@@ -65,7 +65,6 @@ class AnalysisPipeline:
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
         self.job_id = f"analysis_{uuid.uuid4().hex[:8]}"
-        self._transcriber = None  # Set in _extract_audio if audio enabled
 
     # ------------------------------------------------------------------
     # Entry point
@@ -157,10 +156,11 @@ class AnalysisPipeline:
 
         # ── Audio extraction ────────────────────────────────────────────
         audio_segmenter = None
-        full_transcript: Optional[str] = None
 
         if self.config.audio.enabled:
-            audio_segmenter, full_transcript = await self._extract_audio()
+            audio_segmenter = await self._extract_audio()
+
+        supports_native_audio = bool(getattr(adapter, "supports_audio", False))
 
         # ── Frame analysis ──────────────────────────────────────────────
         source = build_source(self.config.source)
@@ -192,30 +192,32 @@ class AnalysisPipeline:
                         anchor_frame = frame.copy()
                         anchor_frame.save(str(cache.thumbnail_path), "JPEG", quality=85)
 
-                    # Per-frame audio window (transcribe mode only)
-                    transcript: Optional[str] = None
+                    # Per-frame audio window — sent natively if adapter supports it
+                    audio_chunk = None
                     audio_mode_label: Optional[str] = None
 
-                    if (
-                        audio_segmenter is not None
-                        and self._transcriber is not None
-                    ):
-                        chunk = audio_segmenter.get_chunk(
+                    if audio_segmenter is not None:
+                        audio_chunk = audio_segmenter.get_chunk(
                             ts, self.config.audio.window_seconds
                         )
-                        if not chunk.is_empty:
-                            transcript = await self._transcriber.transcribe(chunk)
-                            if transcript:
-                                audio_mode_label = "transcribe"
+                        if audio_chunk.is_empty:
+                            audio_chunk = None
 
                     user_prompt, system_prompt = build_prompt(
-                        self.config.prompt, transcript=transcript
+                        self.config.prompt, transcript=None
                     )
 
                     tokens: list[str] = []
                     t0 = time.perf_counter() * 1000
-                    async for token in adapter.infer(frame, user_prompt, system_prompt):
-                        tokens.append(token)
+                    if audio_chunk is not None and supports_native_audio:
+                        audio_mode_label = "native"
+                        async for token in adapter.infer_with_audio(
+                            frame, audio_chunk, user_prompt, system_prompt
+                        ):
+                            tokens.append(token)
+                    else:
+                        async for token in adapter.infer(frame, user_prompt, system_prompt):
+                            tokens.append(token)
                     elapsed = time.perf_counter() * 1000 - t0
 
                     result = InferenceResult(
@@ -225,7 +227,7 @@ class AnalysisPipeline:
                         backend=adapter.backend_name,
                         latency_ms=elapsed,
                         token_count=len(tokens),
-                        audio_transcript=transcript,
+                        audio_transcript=None,
                         audio_mode=audio_mode_label,
                     )
                     cache.add_frame(result)
@@ -234,9 +236,6 @@ class AnalysisPipeline:
                     # Incremental save every 10 frames (checkpoint on crash)
                     if len(cache.frames) % 10 == 0:
                         cache.save()
-
-        if full_transcript:
-            cache.set_full_audio_transcript(full_transcript)
 
         cache.mark_complete()
         cache.save()
@@ -253,15 +252,11 @@ class AnalysisPipeline:
     # ------------------------------------------------------------------
 
     async def _extract_audio(self):
-        """Extract full audio track and transcribe it in 30-second chunks.
+        """Extract full audio track and return an AudioSegmenter for native delivery.
 
-        Returns (AudioSegmenter | None, full_transcript | None).
+        Returns (AudioSegmenter | None).
         """
-        from localvisionai.audio import (
-            AudioSegmenter,
-            FfmpegAudioExtractor,
-            WhisperTranscriber,
-        )
+        from localvisionai.audio import AudioSegmenter, FfmpegAudioExtractor
 
         with console.status("[cyan]Extracting audio track via ffmpeg...[/cyan]"):
             extractor = FfmpegAudioExtractor(self.config)
@@ -269,7 +264,7 @@ class AnalysisPipeline:
 
         if samples is None or len(samples) == 0:
             console.print("[yellow]⚠[/yellow]  No audio track found — skipping audio analysis.")
-            return None, None
+            return None
 
         segmenter = AudioSegmenter(
             samples,
@@ -281,50 +276,7 @@ class AnalysisPipeline:
             f"[green]✓[/green] Audio extracted — {duration:.1f}s at "
             f"{self.config.audio.sample_rate} Hz"
         )
-
-        with console.status(
-            f"[cyan]Loading Whisper ({self.config.audio.whisper_model})...[/cyan]"
-        ):
-            self._transcriber = WhisperTranscriber(
-                model_size=self.config.audio.whisper_model,
-                device=self.config.audio.whisper_device,
-                language=self.config.audio.whisper_language,
-            )
-            await self._transcriber.load()
-        console.print(f"[green]✓[/green] Whisper loaded.")
-
-        with console.status("[cyan]Transcribing full audio...[/cyan]"):
-            full_transcript = await self._transcribe_full(segmenter)
-
-        if full_transcript:
-            word_count = len(full_transcript.split())
-            console.print(
-                f"[green]✓[/green] Audio transcribed — {word_count} word{'s' if word_count != 1 else ''}."
-            )
-        else:
-            console.print("[yellow]⚠[/yellow]  Audio appears silent — no transcript produced.")
-
-        return segmenter, full_transcript or None
-
-    async def _transcribe_full(self, segmenter) -> str:
-        """Transcribe the full audio track in 30-second non-overlapping chunks."""
-        duration = segmenter.duration
-        if duration <= 0 or self._transcriber is None:
-            return ""
-
-        chunk_size = 30.0
-        parts: list[str] = []
-        ts = chunk_size
-
-        while (ts - chunk_size) < duration:
-            chunk = segmenter.get_chunk(ts, chunk_size)
-            if not chunk.is_empty:
-                text = await self._transcriber.transcribe(chunk)
-                if text:
-                    parts.append(text.strip())
-            ts += chunk_size
-
-        return " ".join(parts)
+        return segmenter
 
     # ------------------------------------------------------------------
     # Phase 2: Summary

@@ -28,17 +28,37 @@ logger = get_logger(__name__)
 
 
 def _resolve_ffmpeg() -> str:
-    """Locate the ffmpeg binary, respecting LVA_FFMPEG_PATH."""
+    """Locate the ffmpeg binary.
+
+    Resolution order:
+    1. LVA_FFMPEG_PATH env var (explicit override)
+    2. ffmpeg on the system PATH
+    3. imageio-ffmpeg bundled binary (auto-installed with pip install imageio-ffmpeg)
+    """
     override = os.environ.get("LVA_FFMPEG_PATH")
     if override:
         return override
+
     found = shutil.which("ffmpeg")
-    if not found:
-        raise ModelNotFoundError(
-            "ffmpeg not found on PATH. Install ffmpeg (https://ffmpeg.org/) "
-            "or set LVA_FFMPEG_PATH to the full binary path."
-        )
-    return found
+    if found:
+        return found
+
+    # Try imageio-ffmpeg which ships a bundled binary — no system install needed
+    try:
+        import imageio_ffmpeg  # type: ignore
+        binary = imageio_ffmpeg.get_ffmpeg_exe()
+        if binary:
+            logger.info(f"Using imageio-ffmpeg bundled binary: {binary}")
+            return binary
+    except Exception:
+        pass
+
+    raise ModelNotFoundError(
+        "ffmpeg not found. Install it via one of:\n"
+        "  • pip install imageio-ffmpeg   (easiest — no system install needed)\n"
+        "  • https://ffmpeg.org/download.html  (system-wide install)\n"
+        "  • set LVA_FFMPEG_PATH=/path/to/ffmpeg"
+    )
 
 
 class FfmpegAudioExtractor(AbstractAudioExtractor):

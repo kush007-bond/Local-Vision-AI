@@ -6,8 +6,8 @@ import { WebcamPreview } from './WebcamPreview'
 
 const LOCAL_BACKENDS = new Set<Backend>(['ollama', 'lmstudio', 'transformers', 'llamacpp', 'mlx'])
 
-// Samplers that are referenced in the UI but not yet implemented in the backend
-const UNIMPLEMENTED_SAMPLERS = new Set<SamplerType>(['scene', 'adaptive'])
+// Scene and adaptive samplers are now implemented
+
 
 // Source types not yet implemented in the backend
 const UNIMPLEMENTED_SOURCES = new Set<SourceType>(['rtsp', 'url', 'screen'])
@@ -28,9 +28,8 @@ const DEFAULT: JobConfig = {
   output_formats: ['json'],
   output_dir: './output/',
   audio: false,
-  audio_mode: 'transcribe',
+  audio_mode: 'native',
   audio_window: 3.0,
-  whisper_model: 'base',
 }
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
@@ -178,19 +177,6 @@ export function NewJobForm({ onJobCreated }: Props) {
                   required
                 />
               </Field>
-              <Field label="Whisper model size" hint="Larger = more accurate but slower">
-                <select
-                  className="select"
-                  value={form.whisper_model ?? 'base'}
-                  onChange={e => set('whisper_model', e.target.value as JobConfig['whisper_model'])}
-                >
-                  <option value="tiny">tiny (fastest)</option>
-                  <option value="base">base (recommended)</option>
-                  <option value="small">small</option>
-                  <option value="medium">medium</option>
-                  <option value="large">large (slowest, most accurate)</option>
-                </select>
-              </Field>
             </>
           )}
 
@@ -212,15 +198,9 @@ export function NewJobForm({ onJobCreated }: Props) {
               >
                 <option value="uniform">Uniform FPS</option>
                 <option value="keyframe">Keyframes only</option>
-                <option value="scene">Scene changes (not implemented)</option>
-                <option value="adaptive">Adaptive (not implemented)</option>
+                <option value="scene">Scene changes</option>
+                <option value="adaptive">Adaptive FPS</option>
               </select>
-              {UNIMPLEMENTED_SAMPLERS.has(form.sampler) && (
-                <div className="mt-1 flex items-center gap-1.5 text-xs text-amber-400">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  This sampler is not yet implemented and the job will fail at runtime.
-                </div>
-              )}
             </Field>
 
             <Field label={`FPS (${form.fps})`}>

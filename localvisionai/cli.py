@@ -75,15 +75,11 @@ def run(
     ),
     audio_mode: Optional[str] = typer.Option(
         None, "--audio-mode",
-        help="Audio routing mode: auto|native|transcribe. Default: auto.",
+        help="Audio routing mode: auto|native. Default: auto.",
     ),
     audio_window: Optional[float] = typer.Option(
         None, "--audio-window",
-        help="Seconds of audio sent/transcribed per frame (default: 3.0).",
-    ),
-    whisper_model: Optional[str] = typer.Option(
-        None, "--whisper-model",
-        help="Whisper model size for transcribe mode: tiny|base|small|medium|large.",
+        help="Seconds of audio per frame (default: 3.0).",
     ),
     verbose: bool = typer.Option(False, "--verbose", help="Show latency and token counts."),
 ) -> None:
@@ -113,7 +109,6 @@ def run(
         "audio": audio,
         "audio_mode": audio_mode,
         "audio_window": audio_window,
-        "whisper_model": whisper_model,
     }
 
     try:
@@ -172,11 +167,7 @@ def analyze(
     ),
     audio: bool = typer.Option(
         False, "--audio/--no-audio",
-        help="Enable audio extraction and transcription alongside video frames.",
-    ),
-    whisper_model: str = typer.Option(
-        "base", "--whisper-model",
-        help="Whisper model size: tiny|base|small|medium|large.",
+        help="Enable audio extraction alongside video frames (sent natively to the model).",
     ),
     no_qa: bool = typer.Option(
         False, "--no-qa",
@@ -211,8 +202,6 @@ def analyze(
 
     if audio:
         cli_kwargs["audio"] = True
-        cli_kwargs["audio_mode"] = "transcribe"  # analyze always uses Whisper
-        cli_kwargs["whisper_model"] = whisper_model
 
     try:
         config = PipelineConfig.from_cli(cli_kwargs)

@@ -60,9 +60,8 @@ webcam = ["opencv-python>=4.8"]
 ocr = ["pytesseract>=0.3"]
 whisper = ["openai-whisper>=20231117"]
 audio = [
-    "faster-whisper>=1.0",   # preferred transcription backend (4x faster than openai-whisper)
     "numpy>=1.24",
-    # ffmpeg is a system dependency — checked at runtime by FfmpegAudioExtractor
+    "imageio-ffmpeg>=0.4",   # ships a bundled ffmpeg binary — no system install needed
 ]
 rag = ["chromadb>=0.5", "sentence-transformers>=2.7"]
 gradio = ["gradio>=4.0"]

@@ -84,9 +84,8 @@ class JobCreateRequest(BaseModel):
     output_dir: str = "./output/"
     # Audio settings (only used when source_type='audio' or audio=True)
     audio: bool = False
-    audio_mode: str = "auto"     # auto | native | transcribe
+    audio_mode: str = "auto"     # auto | native
     audio_window: float = 3.0
-    whisper_model: str = "base"
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +164,6 @@ def _build_pipeline_config(req: JobCreateRequest):
         cli_args["audio"] = True
         cli_args["audio_mode"] = req.audio_mode
         cli_args["audio_window"] = req.audio_window
-        cli_args["whisper_model"] = req.whisper_model
     return PipelineConfig.from_cli(cli_args)
 
 
