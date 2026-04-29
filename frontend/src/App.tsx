@@ -71,7 +71,7 @@ export default function App() {
           activeCount={activeCount}
         />
 
-        <main className="relative flex-1 overflow-y-auto">
+        <main className="relative flex-1 overflow-y-auto pb-16 sm:pb-0">
           {view === 'dashboard' && (
             <Dashboard
               onNavigate={handleNavigate}

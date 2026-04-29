@@ -42,6 +42,69 @@ function Field({ label, children, hint }: { label: string; children: React.React
   )
 }
 
+type FpsUnit = 'per_second' | 'per_minute'
+
+function FpsField({ fps, onChange }: { fps: number; onChange: (fps: number) => void }) {
+  const [unit, setUnit] = useState<FpsUnit>('per_second')
+
+  // Display value in the chosen unit; backend always stores frames-per-second
+  const displayValue = unit === 'per_second'
+    ? fps
+    : Math.round(fps * 60 * 10) / 10  // fps → frames/min, 1 decimal
+
+  const [inputVal, setInputVal] = useState(String(displayValue))
+
+  // Keep input in sync when unit changes
+  useEffect(() => {
+    const newDisplay = unit === 'per_second'
+      ? fps
+      : Math.round(fps * 60 * 10) / 10
+    setInputVal(String(newDisplay))
+  }, [unit, fps])
+
+  function commit(raw: string) {
+    const n = parseFloat(raw)
+    if (isNaN(n) || n <= 0) return
+    const asFps = unit === 'per_second' ? n : n / 60
+    // Clamp: min 1 frame/minute (≈0.0167 fps), max 30 fps
+    const clamped = Math.min(30, Math.max(1 / 60, asFps))
+    onChange(Math.round(clamped * 1000) / 1000)
+  }
+
+  const summary = `${fps >= 1
+    ? `${Math.round(fps * 10) / 10} frame${fps !== 1 ? 's' : ''}/sec`
+    : `${Math.round(fps * 60 * 10) / 10} frames/min`
+  } · ~${Math.round(fps * 60)} frames per minute`
+
+  return (
+    <div>
+      <label className="label">Sample rate</label>
+      <div className="flex gap-2">
+        <input
+          className="input"
+          type="number"
+          min={unit === 'per_second' ? 0.017 : 1}
+          max={unit === 'per_second' ? 30 : 1800}
+          step={unit === 'per_second' ? 0.5 : 1}
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onBlur={e => commit(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') commit(inputVal) }}
+        />
+        <select
+          className="select w-auto shrink-0"
+          value={unit}
+          onChange={e => setUnit(e.target.value as FpsUnit)}
+        >
+          <option value="per_second">/ sec</option>
+          <option value="per_minute">/ min</option>
+        </select>
+      </div>
+      <p className="mt-1 text-xs text-gray-600">{summary}</p>
+    </div>
+  )
+}
+
 export function NewJobForm({ onJobCreated }: Props) {
   const [form, setForm]           = useState<JobConfig>(DEFAULT)
   const [backends, setBackends]   = useState<BackendInfo[]>([])
@@ -76,13 +139,13 @@ export function NewJobForm({ onJobCreated }: Props) {
   }
 
   return (
-    <form onSubmit={e => void handleSubmit(e)} className="flex flex-col gap-6 p-6">
+    <form onSubmit={e => void handleSubmit(e)} className="flex flex-col gap-6 p-4 sm:p-6">
       <div>
         <h1 className="text-lg font-semibold text-gray-100">New Pipeline Job</h1>
         <p className="mt-0.5 text-sm text-gray-500">Configure a video source and AI model, then start the pipeline.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         {/* ── Left column: Source ──────────────────────────── */}
         <div className="flex flex-col gap-4">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500">Input Source</h2>
@@ -128,18 +191,10 @@ export function NewJobForm({ onJobCreated }: Props) {
           )}
 
           {form.source_type === 'webcam' && (
-            <>
-              <Field label="Device index" hint="0 = default webcam">
-                <input
-                  className="input"
-                  type="number"
-                  min={0}
-                  value={form.device_index ?? 0}
-                  onChange={e => set('device_index', Number(e.target.value))}
-                />
-              </Field>
-              <WebcamPreview deviceIndex={form.device_index ?? 0} />
-            </>
+            <WebcamPreview
+              deviceIndex={form.device_index ?? 0}
+              onDeviceChange={(idx) => set('device_index', idx)}
+            />
           )}
 
           {form.source_type === 'rtsp' && (
@@ -189,7 +244,7 @@ export function NewJobForm({ onJobCreated }: Props) {
 
           <h2 className="pt-2 text-xs font-semibold uppercase tracking-widest text-gray-500">Sampling</h2>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
             <Field label="Strategy">
               <select
                 className="select"
@@ -203,18 +258,7 @@ export function NewJobForm({ onJobCreated }: Props) {
               </select>
             </Field>
 
-            <Field label={`FPS (${form.fps})`}>
-              <input
-                className="input"
-                type="range"
-                min={0.1}
-                max={5}
-                step={0.1}
-                value={form.fps}
-                onChange={e => set('fps', Number(e.target.value))}
-                style={{ paddingLeft: 0, paddingRight: 0, cursor: 'pointer' }}
-              />
-            </Field>
+            <FpsField fps={form.fps} onChange={v => set('fps', v)} />
           </div>
 
           <Field label="Context mode" hint="Sliding window feeds prior descriptions to the model">

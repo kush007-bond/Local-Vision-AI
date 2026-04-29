@@ -1,5 +1,3 @@
-import type { Backend } from '../types'
-
 const COLORS: Record<string, string> = {
   ollama:       'bg-purple-950 text-purple-300',
   openai:       'bg-emerald-950 text-emerald-300',

@@ -66,9 +66,9 @@ export function Dashboard({ onNavigate, refreshTick }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-6 p-4 sm:p-6">
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Active jobs"     value={active.length}    icon={Play}         color="bg-emerald-950 text-emerald-400" />
         <StatCard label="Completed"       value={completed.length} icon={CheckCircle}  color="bg-blue-950 text-blue-400" />
         <StatCard label="Failed / cancelled" value={failed.length} icon={XCircle}      color="bg-red-950 text-red-400" />

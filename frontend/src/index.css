@@ -5,6 +5,7 @@
 @layer base {
   * {
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
   }
 
   html {
@@ -28,6 +29,10 @@
 
   ::-webkit-scrollbar-thumb:hover {
     background: #373b5c;
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 
@@ -58,6 +63,7 @@
     @apply w-full rounded-lg border border-bg-border bg-bg-elevated px-3 py-2 text-sm text-gray-100
            placeholder-gray-500 transition-colors focus:border-brand focus:outline-none focus:ring-1
            focus:ring-brand disabled:cursor-not-allowed disabled:opacity-50;
+    font-size: max(16px, 0.875rem); /* prevent iOS zoom on focus */
   }
 
   .label {
@@ -67,5 +73,6 @@
   .select {
     @apply w-full rounded-lg border border-bg-border bg-bg-elevated px-3 py-2 text-sm text-gray-100
            focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand;
+    font-size: max(16px, 0.875rem); /* prevent iOS zoom on focus */
   }
 }

@@ -1,0 +1,27 @@
+# Cloudflare Named Tunnel configuration for LocalVisionAI
+# Use this for a FIXED public URL (e.g. localvisionai.yourdomain.com)
+#
+# Setup (one-time):
+#   1. cloudflared login
+#   2. cloudflared tunnel create localvisionai
+#   3. Copy the tunnel ID from the output into tunnel: below
+#   4. cloudflared tunnel route dns localvisionai localvisionai.yourdomain.com
+#
+# Then start with:
+#   cloudflared tunnel --config cloudflare/tunnel-config.yml run
+
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: ~/.cloudflared/<YOUR_TUNNEL_ID>.json
+
+ingress:
+  - hostname: localvisionai.yourdomain.com
+    service: http://localhost:8765
+    originRequest:
+      # Required for WebSocket support (AI result streaming)
+      noTLSVerify: false
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
+      keepAliveConnections: 100
+      keepAliveTimeout: 90s
+  # Catch-all (required by cloudflared)
+  - service: http_status:404

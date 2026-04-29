@@ -543,15 +543,10 @@ async def job_websocket(websocket: WebSocket, job_id: str):
 
 # ---------------------------------------------------------------------------
 # Serve built frontend (production)
+# Mount LAST so all /api/* and /ws/* routes above take priority.
+# StaticFiles(html=True) serves index.html for any path not found on disk,
+# which is exactly what a React SPA needs.
 # ---------------------------------------------------------------------------
 
-@app.on_event("startup")
-async def _mount_frontend():
-    if _FRONTEND_DIST.exists():
-        from fastapi.responses import FileResponse
-
-        @app.get("/")
-        async def serve_index():
-            return FileResponse(_FRONTEND_DIST / "index.html")
-
-        app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="assets")
+if _FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")

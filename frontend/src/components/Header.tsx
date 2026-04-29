@@ -6,7 +6,7 @@ interface Props {
 
 export function Header({ serverOnline }: Props) {
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-bg-border bg-bg-surface px-5">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-bg-border bg-bg-surface px-4 sm:px-5">
       {/* Logo */}
       <div className="flex items-center gap-2.5">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand/20">
@@ -17,9 +17,8 @@ export function Header({ serverOnline }: Props) {
         </span>
       </div>
 
-      <div className="mx-3 h-5 w-px bg-bg-border" />
-
-      <span className="text-xs text-gray-500">Local video understanding pipeline</span>
+      <div className="mx-3 hidden h-5 w-px bg-bg-border sm:block" />
+      <span className="hidden text-xs text-gray-500 sm:block">Local video understanding pipeline</span>
 
       {/* Spacer */}
       <div className="flex-1" />
@@ -28,7 +27,8 @@ export function Header({ serverOnline }: Props) {
       <div className="flex items-center gap-2 rounded-full border border-bg-border bg-bg-elevated px-3 py-1">
         <Activity className="h-3.5 w-3.5 text-gray-500" />
         <span className={`text-xs font-medium ${serverOnline ? 'text-emerald-400' : 'text-red-400'}`}>
-          {serverOnline ? 'Server online' : 'Server offline'}
+          <span className="hidden sm:inline">{serverOnline ? 'Server online' : 'Server offline'}</span>
+          <span className="sm:hidden">{serverOnline ? 'Online' : 'Offline'}</span>
         </span>
         <span
           className={`h-1.5 w-1.5 rounded-full ${

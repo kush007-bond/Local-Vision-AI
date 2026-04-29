@@ -145,14 +145,14 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
   return (
     <div className="flex h-full flex-col">
       {/* ── Top bar ──────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-bg-border bg-bg-surface px-5 py-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-bg-border bg-bg-surface px-4 py-3 sm:gap-3 sm:px-5">
         <button onClick={onBack} className="btn-ghost px-2 py-1 text-xs">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
 
-        <div className="mx-1 h-4 w-px bg-bg-border" />
+        <div className="mx-1 hidden h-4 w-px bg-bg-border sm:block" />
 
-        <code className="font-mono text-xs text-gray-500">{jobId}</code>
+        <code className="hidden font-mono text-xs text-gray-500 sm:block">{jobId}</code>
 
         {job && <BackendBadge backend={job.backend} />}
         {job && <span className="text-sm font-medium text-gray-200">{job.model_id}</span>}
@@ -162,9 +162,10 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
         <div className="flex-1" />
 
         {/* Stats chips */}
-        <div className="flex items-center gap-3 text-xs text-gray-500">
+        <div className="flex items-center gap-2 text-xs text-gray-500 sm:gap-3">
           <span className="flex items-center gap-1">
-            <Layers className="h-3.5 w-3.5" /> {results.length} frames
+            <Layers className="h-3.5 w-3.5" /> {results.length}
+            <span className="hidden sm:inline"> frames</span>
           </span>
           {elapsed && (
             <span className="flex items-center gap-1">
@@ -172,7 +173,7 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
             </span>
           )}
           {avgLatency && (
-            <span>avg {avgLatency} ms</span>
+            <span className="hidden sm:inline">avg {avgLatency} ms</span>
           )}
         </div>
 
@@ -205,7 +206,7 @@ export function JobDetail({ jobId, onBack, onJobUpdate, sourceType, deviceIndex 
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-5"
+        className="flex-1 overflow-y-auto p-4 sm:p-5"
       >
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-800 bg-red-950/50 px-4 py-3 text-sm text-red-400">
